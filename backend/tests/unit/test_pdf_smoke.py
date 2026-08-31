@@ -1,12 +1,17 @@
-"""Check PDF flow: generate one page, reopen it, and recover its text with PyMuPDF."""
-
 from pathlib import Path
 
 import pymupdf
 
+"""
+Test that the installed library can read generated PDF text.
+Run this before runining the PDF extractot test.  
+
+"""
+
+# Basic tests
 
 def test_pymupdf_extracts_page_text(tmp_path: Path) -> None:
-    # generate a temp PDF containing a known tender requirement.
+    # Generate a temporary PDF with known text.
     pdf_path = tmp_path / "smoke-test.pdf"
 
     document = pymupdf.open()
@@ -18,7 +23,7 @@ def test_pymupdf_extracts_page_text(tmp_path: Path) -> None:
     document.save(pdf_path)
     document.close()
 
-    # parse the saved file and verify its page count and extracted text.
+    # Reopen the saved PDF to check the full library flow.
     with pymupdf.open(pdf_path) as parsed_document:
         assert parsed_document.page_count == 1
 

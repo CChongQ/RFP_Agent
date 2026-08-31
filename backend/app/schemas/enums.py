@@ -29,3 +29,9 @@ class RuleOutcome(StrEnum):
     FAILED = "failed"
     NOT_APPLICABLE = "not_applicable"
     REQUIRES_HUMAN_REVIEW = "requires_human_review"
+
+
+class OverallRecommendation(StrEnum):
+    BID = "bid"
+    NO_BID = "no_bid"
+    HUMAN_REVIEW = "human_review"

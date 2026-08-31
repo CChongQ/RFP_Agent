@@ -14,17 +14,25 @@ class DeterministicRuleResult(SchemaModel):
     reason: NonEmptyString
 
 
+class EvidenceAssessment(SchemaModel):
+    """Records model suggestion"""
+
+    status: DecisionStatus
+    evidence_ids: list[NonEmptyString] = Field(default_factory=list)
+    reason: NonEmptyString
+
+
 class Decision(SchemaModel):
     """Records the evidence-backed result for one requirement"""
 
     requirement_id: NonEmptyString
     status: DecisionStatus
-    
+
     evidence_ids: list[NonEmptyString] = Field(default_factory=list)
     reason: NonEmptyString
     rule_result: DeterministicRuleResult | None = None
 
-    #validate evidence
+    # Final result must have evidence support 
     @model_validator(mode="after")
     def require_evidence_for_satisfied_status(self) -> Self:
         if self.status is DecisionStatus.SATISFIED and not self.evidence_ids:

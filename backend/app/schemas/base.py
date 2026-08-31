@@ -16,4 +16,5 @@ type Sha256 = Annotated[
 class SchemaModel(BaseModel):
     """Rejects unexpected fields in data exchanged by the workflow"""
 
+    # Reject typos instead of silently dropping fields at service boundaries
     model_config = ConfigDict(extra="forbid")
