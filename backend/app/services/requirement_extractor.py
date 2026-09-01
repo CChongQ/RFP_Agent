@@ -19,8 +19,6 @@ class RequirementExtractionError(RuntimeError):
 
 @dataclass(frozen=True)
 class RequirementExtractionChunk:
-    """Keeps model input paired with the source blocks it may reference"""
-
     input_text: str
     source_block_ids: frozenset[str]
 
@@ -38,7 +36,7 @@ class RequirementModelClient(Protocol):
 
 
 class OpenAIRequirementModelClient:
-    """Adapts the OpenAI Responses API to the local extraction boundary"""
+    """translator between this app and OpenAI Responses API"""
 
     def __init__(
         self,
@@ -78,23 +76,34 @@ class OpenAIRequirementModelClient:
 
 
 def _format_page(page: ExtractedPage) -> str:
-    # Generated block IDs let the model cite source text without copying it
-    formatted_blocks = "\n".join(
-        (
-            f'<source_block id="{block.block_id}">\n'
-            f"{block.text}\n"
-            "</source_block>"
-        )
-        for block in page.blocks
-    )
-    return f'<pdf_page number="{page.page_number}">\n{formatted_blocks}\n</pdf_page>'
+    """For model input, format one PDF page and its blocks with block id"""
+
+    formatted_blocks: list[str] = []
+    for block in page.blocks:
+        block_lines = [
+            f'<source_block id="{block.block_id}">',
+            block.text,
+            "</source_block>",
+        ]
+        formatted_blocks.append("\n".join(block_lines))
+
+    page_lines = [
+        f'<pdf_page number="{page.page_number}">',
+        "\n".join(formatted_blocks),
+        "</pdf_page>",
+    ]
+    return "\n".join(page_lines)
 
 
 def _build_page_chunks(
     pages: Sequence[ExtractedPage],
     max_chunk_characters: int,
 ) -> list[RequirementExtractionChunk]:
+    """Combine consecutive PDF pages into chunks without splitting a page.
     
+    Example: Page 1 has 4k chars, Page 2 has 5k chars; with 10k limit -> Chunk 1 has 9k chars
+    """
+
     if max_chunk_characters < 1:
         raise ValueError("max_chunk_characters must be at least 1")
 
@@ -103,7 +112,6 @@ def _build_page_chunks(
     chunk_source_ids: set[str] = set()
     chunk_length = 0
 
-    # Keep pages intact so a chunk boundary never breaks page provenance
     for page in pages:
         
         page_block = _format_page(page)
@@ -142,6 +150,7 @@ def _build_page_chunks(
 def _index_source_blocks(
     pages: Sequence[ExtractedPage],
 ) -> tuple[dict[str, ExtractedBlock], dict[str, tuple[int, int]]]:
+    """Index each source block by ID and record its page and position in  PDF"""
     
     page_numbers = [page.page_number for page in pages]
     if len(set(page_numbers)) != len(page_numbers):
@@ -151,6 +160,7 @@ def _index_source_blocks(
     block_order: dict[str, tuple[int, int]] = {}
     for page in pages:
         for position, block in enumerate(page.blocks):
+            
             if block.page_number != page.page_number:
                 raise RequirementExtractionError(
                     f"source block {block.block_id} has an inconsistent page number"
@@ -159,8 +169,10 @@ def _index_source_blocks(
                 raise RequirementExtractionError(
                     f"source block ID {block.block_id} must be unique"
                 )
+                
             blocks_by_id[block.block_id] = block
             block_order[block.block_id] = (page.page_number, position)
+            
     return blocks_by_id, block_order
 
 
@@ -176,31 +188,21 @@ def _resolve_candidate_source(
     if len(candidate.source_block_ids) != len(set(candidate.source_block_ids)):
         raise RequirementExtractionError("requirement source block IDs must be unique")
 
-    unknown_ids = [
-        block_id
-        for block_id in candidate.source_block_ids
-        if block_id not in blocks_by_id
-    ]
-    if unknown_ids:
-        raise RequirementExtractionError(
-            f"requirement references unknown source block ID {unknown_ids[0]}"
-        )
+    selected_blocks: list[ExtractedBlock] = []
+    for block_id in candidate.source_block_ids:
+        if block_id not in blocks_by_id:
+            raise RequirementExtractionError(
+                f"requirement references unknown source block ID, example: {block_id}"
+            )
+        if block_id not in allowed_block_ids:
+            raise RequirementExtractionError(
+                "requirement references source block outside the current model chunk: "
+                f"{block_id}"
+            )
+        selected_blocks.append(blocks_by_id[block_id])
 
-    outside_chunk_ids = [
-        block_id
-        for block_id in candidate.source_block_ids
-        if block_id not in allowed_block_ids
-    ]
-    if outside_chunk_ids:
-        raise RequirementExtractionError(
-            "requirement references source block outside the current model chunk: "
-            f"{outside_chunk_ids[0]}"
-        )
-
-    selected_blocks = sorted(
-        (blocks_by_id[block_id] for block_id in candidate.source_block_ids),
-        key=lambda block: block_order[block.block_id],
-    )
+    # Restore the blocks original reading order in the PDF
+    selected_blocks.sort(key=lambda block: block_order[block.block_id])
     source_references = [
         SourceReference(
             block_id=block.block_id,
@@ -287,4 +289,5 @@ def extract_requirements(
 
     if not requirements:
         raise RequirementExtractionError("model returned no requirements")
+    
     return requirements
