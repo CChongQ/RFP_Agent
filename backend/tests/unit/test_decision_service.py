@@ -13,6 +13,7 @@ from app.schemas import (
     Requirement,
     RequirementType,
     RuleOutcome,
+    SourceReference,
 )
 from app.services.decision_service import DecisionService
 
@@ -78,6 +79,13 @@ def _requirement() -> Requirement:
         requirement_type=RequirementType.MANDATORY,
         source_page=4,
         source_excerpt="The bidder must demonstrate relevant implementation experience",
+        source_references=[
+            SourceReference(
+                block_id="P004-B001",
+                page_number=4,
+                bounding_box=(72.0, 72.0, 500.0, 100.0),
+            )
+        ],
     )
 
 

@@ -46,9 +46,12 @@ class TenderCatalog:
         requested_id = tender_id.strip()
         if not requested_id:
             raise ValueError("tender_id cannot be empty")
+        
         rows = self._read_manifest_rows()
         row = self._find_accepted_row(rows, requested_id)
+        
         tender = self._build_tender(row)
+        
         return tender, self._resolve_pdf_path(tender)
 
     def _read_manifest_rows(self) -> list[dict[str, str]]:

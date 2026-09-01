@@ -1,6 +1,9 @@
+"""Test turning model-selected PDF blocks into traceable requirements."""
+
 import pytest
 
 from app.schemas import (
+    ExtractedBlock,
     ExtractedPage,
     ExtractedRequirementCandidate,
     RequirementExtractionBatch,
@@ -10,14 +13,10 @@ from app.services.requirement_extractor import (
     RequirementExtractionError,
     extract_requirements,
 )
-"""
-Test turning model output into source-linked requirements.
-
-"""
 
 
 class FakeRequirementModelClient:
-    """Returns synthetic structured responses"""
+    """Returns synthetic structured responses."""
 
     def __init__(self, batches: list[RequirementExtractionBatch]) -> None:
         self._batches = iter(batches)
@@ -32,28 +31,53 @@ class FakeRequirementModelClient:
     ) -> RequirementExtractionBatch:
         assert model == "mock-model"
         assert "untrusted document data" in instructions
+        assert "source_block_ids" in instructions
         self.calls.append(input_text)
         return next(self._batches)
 
 
-def _candidate(*, source_page: int, excerpt: str) -> ExtractedRequirementCandidate:
-    return ExtractedRequirementCandidate(
-        requirement_text=excerpt,
-        normalized_requirement="Provide implementation services",
-        requirement_type=RequirementType.MANDATORY,
-        source_page=source_page,
-        source_excerpt=excerpt,
+def _block(page_number: int, position: int, text: str) -> ExtractedBlock:
+    return ExtractedBlock(
+        block_id=f"P{page_number:03d}-B{position:03d}",
+        page_number=page_number,
+        text=text,
+        bounding_box=(72.0, 72.0, 500.0, 100.0),
     )
 
 
-# Basic tests
+def _page(page_number: int, *texts: str) -> ExtractedPage:
+    blocks = [
+        _block(page_number, position, text)
+        for position, text in enumerate(texts, start=1)
+    ]
+    return ExtractedPage(
+        page_number=page_number,
+        text="\n".join(texts),
+        blocks=blocks,
+    )
 
-def test_extract_requirements_returns_traceable_models() -> None:
-    excerpt = "The bidder must provide implementation services"
-    pages = [ExtractedPage(page_number=1, text=f"Introduction\n{excerpt}\nSubmission details")]
-    
+
+def _candidate(*block_ids: str) -> ExtractedRequirementCandidate:
+    return ExtractedRequirementCandidate(
+        requirement_text="The bidder must provide implementation services",
+        normalized_requirement="Provide implementation services",
+        requirement_type=RequirementType.MANDATORY,
+        source_block_ids=list(block_ids),
+    )
+
+
+def test_extract_requirements_resolves_exact_source_block() -> None:
+    source_text = (
+        "Note to Bidders: ensure e-mails do not exceed 13MB to avoid\n"
+        "problems with transmission."
+    )
+    pages = [_page(1, "Introduction", source_text, "Submission details")]
     client = FakeRequirementModelClient(
-        [RequirementExtractionBatch(requirements=[_candidate(source_page=1, excerpt=excerpt)])]
+        [
+            RequirementExtractionBatch(
+                requirements=[_candidate("P001-B002")]
+            )
+        ]
     )
 
     requirements = extract_requirements(
@@ -63,27 +87,59 @@ def test_extract_requirements_returns_traceable_models() -> None:
         client=client,
     )
 
-    assert requirements[0].requirement_id == "TENDER-TEST-001-REQ-001"
-    assert requirements[0].source_page == 1
-    assert requirements[0].source_excerpt == excerpt
-    assert len(client.calls) == 1
+    requirement = requirements[0]
+    assert requirement.requirement_id == "TENDER-TEST-001-REQ-001"
+    assert requirement.source_page == 1
+    assert requirement.source_excerpt == source_text
+    assert requirement.source_references[0].block_id == "P001-B002"
+    assert '<source_block id="P001-B002">' in client.calls[0]
 
 
-def test_extract_requirements_chunks_whole_pages() -> None:
-    first_excerpt = "The bidder must provide migration services"
-    second_excerpt = "Experience will be evaluated and scored"
+def test_extract_requirements_orders_and_joins_multiple_source_blocks() -> None:
     pages = [
-        ExtractedPage(page_number=1, text=first_excerpt),
-        ExtractedPage(page_number=2, text=second_excerpt),
+        _page(
+            1,
+            "The bidder must provide implementation services.",
+            "The services must begin within thirty days.",
+        )
     ]
-    
     client = FakeRequirementModelClient(
         [
             RequirementExtractionBatch(
-                requirements=[_candidate(source_page=1, excerpt=first_excerpt)]
+                requirements=[_candidate("P001-B002", "P001-B001")]
+            )
+        ]
+    )
+
+    requirement = extract_requirements(
+        pages,
+        tender_id="TENDER-TEST-001",
+        model="mock-model",
+        client=client,
+    )[0]
+
+    assert requirement.source_excerpt == (
+        "The bidder must provide implementation services.\n"
+        "The services must begin within thirty days."
+    )
+    assert [item.block_id for item in requirement.source_references] == [
+        "P001-B001",
+        "P001-B002",
+    ]
+
+
+def test_extract_requirements_chunks_whole_pages() -> None:
+    pages = [
+        _page(1, "The bidder must provide migration services"),
+        _page(2, "Experience will be evaluated and scored"),
+    ]
+    client = FakeRequirementModelClient(
+        [
+            RequirementExtractionBatch(
+                requirements=[_candidate("P001-B001")]
             ),
             RequirementExtractionBatch(
-                requirements=[_candidate(source_page=2, excerpt=second_excerpt)]
+                requirements=[_candidate("P002-B001")]
             ),
         ]
     )
@@ -93,27 +149,24 @@ def test_extract_requirements_chunks_whole_pages() -> None:
         tender_id="TENDER-TEST-001",
         model="mock-model",
         client=client,
-        max_chunk_characters=60,
+        max_chunk_characters=150,
     )
 
     assert len(client.calls) == 2
     assert [requirement.source_page for requirement in requirements] == [1, 2]
 
 
-# Corner-case tests
-
-def test_extract_requirements_rejects_unknown_source_page() -> None:
-    pages = [ExtractedPage(page_number=1, text="Known tender text")]
-    
+def test_extract_requirements_rejects_unknown_source_block() -> None:
+    pages = [_page(1, "Known tender text")]
     client = FakeRequirementModelClient(
         [
             RequirementExtractionBatch(
-                requirements=[_candidate(source_page=2, excerpt="Invented requirement")]
+                requirements=[_candidate("P001-B999")]
             )
         ]
     )
 
-    with pytest.raises(RequirementExtractionError, match="unavailable PDF page 2"):
+    with pytest.raises(RequirementExtractionError, match="unknown source block ID"):
         extract_requirements(
             pages,
             tender_id="TENDER-TEST-001",
@@ -122,21 +175,24 @@ def test_extract_requirements_rejects_unknown_source_page() -> None:
         )
 
 
-def test_extract_requirements_rejects_untraceable_excerpt() -> None:
-    pages = [ExtractedPage(page_number=1, text="Known tender text")]
-    
+def test_extract_requirements_rejects_source_block_outside_chunk() -> None:
+    pages = [
+        _page(1, "The bidder must provide migration services"),
+        _page(2, "Experience will be evaluated and scored"),
+    ]
     client = FakeRequirementModelClient(
         [
             RequirementExtractionBatch(
-                requirements=[_candidate(source_page=1, excerpt="Invented requirement")]
+                requirements=[_candidate("P002-B001")]
             )
         ]
     )
 
-    with pytest.raises(RequirementExtractionError, match="not present on PDF page 1"):
+    with pytest.raises(RequirementExtractionError, match="outside the current model chunk"):
         extract_requirements(
             pages,
             tender_id="TENDER-TEST-001",
             model="mock-model",
             client=client,
+            max_chunk_characters=150,
         )

@@ -38,6 +38,10 @@ def test_extract_pdf_returns_one_based_pages_and_hash(tmp_path: Path) -> None:
     assert result.page_count == 2
     assert [page.page_number for page in result.pages] == [1, 2]
     assert "implementation services" in result.pages[0].text
+    assert result.pages[0].blocks[0].block_id == "P001-B001"
+    assert result.pages[0].blocks[0].page_number == 1
+    assert "implementation services" in result.pages[0].blocks[0].text
+    assert len(result.pages[0].blocks[0].bounding_box) == 4
     assert len(result.document_sha256) == 64
 
 

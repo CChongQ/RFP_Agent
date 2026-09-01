@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pymupdf
 
-from app.schemas.pdf import ExtractedPage, PdfExtractionResult
+from app.schemas.pdf import ExtractedBlock, ExtractedPage, PdfExtractionResult
 
 BYTES_PER_MEGABYTE = 1024 * 1024
 HASH_READ_SIZE = BYTES_PER_MEGABYTE
@@ -37,6 +37,7 @@ def _validate_limits(
 
 
 def _validate_pdf_file(path: Path, *, max_pdf_mb: int) -> int:
+    
     if not path.is_file():
         raise PdfExtractionError(f"PDF file does not exist: {path}")
     if path.suffix.casefold() != ".pdf":
@@ -51,9 +52,41 @@ def _validate_pdf_file(path: Path, *, max_pdf_mb: int) -> int:
     return file_size_bytes
 
 
+def _extract_page_blocks(
+    page: pymupdf.Page,
+    *,
+    page_number: int,
+) -> list[ExtractedBlock]:
+    """
+        x0,           # block[0]
+        y0,           # block[1]
+        x1,           # block[2]
+        y1,           # block[3]
+        text,         # block[4]
+        block_number, # block[5]
+        block_type,   # block[6]
+    """
+    text_blocks = [
+        block
+        for block in page.get_text("blocks", sort=True)
+        if block[6] == 0 and block[4].strip()
+    ]
+    
+    return [
+        ExtractedBlock(
+            block_id=f"P{page_number:03d}-B{block_number:03d}",
+            page_number=page_number,
+            text=block[4].strip(),
+            bounding_box=(block[0], block[1], block[2], block[3]),
+        )
+        for block_number, block in enumerate(text_blocks, start=1)
+    ]
+
+
 def _extract_pages(path: Path, *, max_pdf_pages: int) -> list[ExtractedPage]:
     try:
         with pymupdf.open(path) as document:
+            
             if document.needs_pass:
                 raise PdfExtractionError("password-protected PDFs are not supported")
             if document.page_count < 1:
@@ -64,11 +97,26 @@ def _extract_pages(path: Path, *, max_pdf_pages: int) -> list[ExtractedPage]:
                     f"the {max_pdf_pages}-page limit"
                 )
 
-            # Convert zero-based library indexes to page numbers shown to users.
-            return [
-                ExtractedPage(page_number=index + 1, text=page.get_text().strip())
-                for index, page in enumerate(document)
-            ]
+            pages: list[ExtractedPage] = []
+            for index, page in enumerate(document):
+                page_number = index + 1
+                text = page.get_text().strip()
+                
+                blocks = _extract_page_blocks(page, page_number=page_number)
+                
+                if text and not blocks:
+                    raise PdfExtractionError(
+                        f"PDF page {page_number} has text but no usable text blocks"
+                    )
+                pages.append(
+                    ExtractedPage(
+                        page_number=page_number,
+                        text=text,
+                        blocks=blocks,
+                    )
+                )
+
+            return pages
     except PdfExtractionError:
         raise
     except (pymupdf.FileDataError, RuntimeError, ValueError) as exc:
@@ -76,7 +124,7 @@ def _extract_pages(path: Path, *, max_pdf_pages: int) -> list[ExtractedPage]:
 
 
 def _count_text_characters(pages: list[ExtractedPage]) -> int:
-    # Ignore whitespace so blank and image-only PDFs are rejected.
+    # Ignore whitespace so blank and image-only PDFs are rejected
     return sum(len("".join(page.text.split())) for page in pages)
 
 

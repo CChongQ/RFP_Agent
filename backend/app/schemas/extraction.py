@@ -11,8 +11,7 @@ class ExtractedRequirementCandidate(SchemaModel):
     requirement_text: NonEmptyString
     normalized_requirement: NonEmptyString
     requirement_type: RequirementType
-    source_page: int = Field(ge=1)
-    source_excerpt: NonEmptyString
+    source_block_ids: list[NonEmptyString] = Field(min_length=1)
     requires_human_review: bool = False
 
 

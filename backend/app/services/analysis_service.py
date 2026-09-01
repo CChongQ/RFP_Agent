@@ -77,6 +77,7 @@ class AnalysisProgress:
     started_at: float
     usage_before: ModelUsageSnapshot
     requirement_ids: list[str] = field(default_factory=list)
+    requirement_source_block_ids: dict[str, list[str]] = field(default_factory=dict)
     tool_calls: list[ToolCallTrace] = field(default_factory=list)
 
 
@@ -138,6 +139,12 @@ class AnalysisService:
             #get requirements
             requirements = self._extract_requirements(tender, extraction)
             progress.requirement_ids = [item.requirement_id for item in requirements]
+            progress.requirement_source_block_ids = {
+                item.requirement_id: [
+                    reference.block_id for reference in item.source_references
+                ]
+                for item in requirements
+            }
             self._persist_requirements(requirements)
             
             #make decision
@@ -273,6 +280,7 @@ class AnalysisService:
             output_tokens=usage.output_tokens,
             estimated_cost_usd=usage.estimated_cost_usd,
             extracted_requirement_ids=progress.requirement_ids,
+            requirement_source_block_ids=progress.requirement_source_block_ids,
             tool_calls=progress.tool_calls,
             errors=errors or [],
         )
@@ -309,6 +317,10 @@ class AnalysisService:
                     requirement_type=requirement.requirement_type.value,
                     source_page=requirement.source_page,
                     source_excerpt=requirement.source_excerpt,
+                    source_references=[
+                        reference.model_dump(mode="json")
+                        for reference in requirement.source_references
+                    ],
                     requires_human_review=requirement.requires_human_review,
                 )
             )

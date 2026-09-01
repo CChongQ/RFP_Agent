@@ -12,6 +12,7 @@ from app.schemas import (
     OverallRecommendation,
     Requirement,
     RequirementType,
+    SourceReference,
     TenderDocument,
     TraceMetadata,
 )
@@ -37,6 +38,13 @@ def _requirement(*, source_page: int = 3) -> Requirement:
         requirement_type=RequirementType.MANDATORY,
         source_page=source_page,
         source_excerpt=TEST_REQUIREMENT_TEXT,
+        source_references=[
+            SourceReference(
+                block_id=f"P{source_page:03d}-B001",
+                page_number=source_page,
+                bounding_box=(72.0, 72.0, 500.0, 100.0),
+            )
+        ],
     )
 
 

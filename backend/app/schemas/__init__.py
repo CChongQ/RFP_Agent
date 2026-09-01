@@ -15,8 +15,8 @@ from app.schemas.enums import (
 )
 from app.schemas.evidence import Evidence
 from app.schemas.extraction import ExtractedRequirementCandidate, RequirementExtractionBatch
-from app.schemas.pdf import ExtractedPage, PdfExtractionResult
-from app.schemas.requirement import Requirement
+from app.schemas.pdf import ExtractedBlock, ExtractedPage, PdfExtractionResult
+from app.schemas.requirement import Requirement, SourceReference
 from app.schemas.retrieval import EvidenceSearchHit
 from app.schemas.tender import TenderDocument
 
@@ -31,6 +31,7 @@ __all__ = [
     "EvidenceAssessment",
     "EvidenceSearchHit",
     "EvidenceType",
+    "ExtractedBlock",
     "ExtractedPage",
     "ExtractedRequirementCandidate",
     "OverallRecommendation",
@@ -39,6 +40,7 @@ __all__ = [
     "RequirementExtractionBatch",
     "RequirementType",
     "RuleOutcome",
+    "SourceReference",
     "TenderDocument",
     "ToolCallTrace",
     "TraceMetadata",

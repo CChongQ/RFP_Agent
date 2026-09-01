@@ -1,6 +1,6 @@
 
 """
-Note: In this script, args with name 'actual' means value the company currently actually has, based on its evidence
+Note: In this script, args with name 'actual' means the value that the company currently actually has, based on its evidence
 """
 
 from collections.abc import Collection

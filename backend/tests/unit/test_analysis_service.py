@@ -9,11 +9,13 @@ from app.database.models import AnalysisRunRecord, DecisionRecord, RequirementRe
 from app.schemas import (
     Decision,
     DecisionStatus,
+    ExtractedBlock,
     ExtractedPage,
     OverallRecommendation,
     PdfExtractionResult,
     Requirement,
     RequirementType,
+    SourceReference,
     TenderDocument,
     ToolCallTrace,
 )
@@ -50,6 +52,14 @@ def _pdf_result(path: Path, document_sha256: str = TEST_SHA256) -> PdfExtraction
             ExtractedPage(
                 page_number=1,
                 text="The bidder must demonstrate implementation experience",
+                blocks=[
+                    ExtractedBlock(
+                        block_id="P001-B001",
+                        page_number=1,
+                        text="The bidder must demonstrate implementation experience",
+                        bounding_box=(72.0, 72.0, 500.0, 100.0),
+                    )
+                ],
             )
         ],
     )
@@ -64,6 +74,13 @@ def _requirement() -> Requirement:
         requirement_type=RequirementType.MANDATORY,
         source_page=1,
         source_excerpt="The bidder must demonstrate implementation experience",
+        source_references=[
+            SourceReference(
+                block_id="P001-B001",
+                page_number=1,
+                bounding_box=(72.0, 72.0, 500.0, 100.0),
+            )
+        ],
     )
 
 
@@ -135,12 +152,21 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
     assert result.analysis_id == "ANALYSIS-TEST-001"
     assert result.overall_recommendation is OverallRecommendation.BID
     assert result.trace.extracted_requirement_ids == [requirement.requirement_id]
+    assert result.trace.requirement_source_block_ids == {
+        requirement.requirement_id: ["P001-B001"]
+    }
     assert result.trace.tool_calls[0].result_ids == ["PROJECT-TEST-001"]
     assert result.trace.latency_ms == 25
     assert any(
         isinstance(call.args[0], RequirementRecord)
         for call in session.merge.call_args_list
     )
+    requirement_record = next(
+        call.args[0]
+        for call in session.merge.call_args_list
+        if isinstance(call.args[0], RequirementRecord)
+    )
+    assert requirement_record.source_references[0]["block_id"] == "P001-B001"
     assert any(
         isinstance(call.args[0], DecisionRecord) for call in session.merge.call_args_list
     )

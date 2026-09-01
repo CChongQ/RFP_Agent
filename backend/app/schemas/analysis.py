@@ -41,6 +41,9 @@ class TraceMetadata(SchemaModel):
     estimated_cost_usd: Annotated[float, Field(ge=0)] = 0.0
     
     extracted_requirement_ids: list[NonEmptyString] = Field(default_factory=list)
+    requirement_source_block_ids: dict[str, list[NonEmptyString]] = Field(
+        default_factory=dict
+    )
     tool_calls: list[ToolCallTrace] = Field(default_factory=list)
     errors: list[NonEmptyString] = Field(default_factory=list)
 

@@ -1,16 +1,19 @@
-"""Check external AI flow: pass safety gates, call Responses once, and validate its text."""
-
 import pytest
 from openai import OpenAI
 
 from app.core.config import get_settings
 
+"""
+Test one real OpenAI request when external calls are enabled.
+"""
+
+# Basic tests
 
 @pytest.mark.external
 def test_openai_responses_api() -> None:
     settings = get_settings()
 
-    # Safety gate: normal test runs must not make a paid external request accidentally
+    # Safety gate: normal test runs must not make a paid external request 
     if not settings.enable_external_api_calls:
         pytest.skip("External API calls are disabled")
 
@@ -25,7 +28,7 @@ def test_openai_responses_api() -> None:
     if not settings.openai_model:
         pytest.skip("OPENAI_MODEL is not configured")
 
-    # make one minimal Responses API request using configured credentials and limits
+    # note: keep the paid smoke request as small as possible
     client = OpenAI(
         api_key=api_key,
         timeout=settings.openai_timeout_seconds,
@@ -37,6 +40,6 @@ def test_openai_responses_api() -> None:
         input="Reply with exactly the word OK.",
     )
 
-    # API returned usable text and followed the simple smoke-test instruction
+    # Confirm the response contains usable text and follows the short instruction
     assert response.output_text
     assert "OK" in response.output_text.upper()

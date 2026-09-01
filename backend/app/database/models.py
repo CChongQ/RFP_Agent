@@ -98,6 +98,9 @@ class RequirementRecord(Base):
     #page and excerpt keeps a direct path back to the tender text
     source_page: Mapped[int] = mapped_column(Integer)
     source_excerpt: Mapped[str] = mapped_column(Text)
+    source_references: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, default=list, server_default=text("'[]'::jsonb")
+    )
     
     requires_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
     
@@ -198,7 +201,7 @@ class DecisionRecord(Base):
         Index("idx_decisions_requirement_id", "requirement_id"),
     )
 
-    # for dup check: composite key (analysis, requirement) allows one decision per requirement in each run
+    # Composite key allows one decision per requirement in each analysis run
     analysis_id: Mapped[str] = mapped_column(
         ForeignKey("analysis_runs.id", ondelete="CASCADE"), primary_key=True
     )
