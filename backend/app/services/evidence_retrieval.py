@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session
 from app.database.models import EvidenceRecord
 from app.schemas import Evidence, EvidenceSearchHit, EvidenceType
 
+"""Create embeddings and retrieve company evidence from the database"""
+
+
 MAX_TOP_K = 50
 EXCERPT_CHARACTERS = 240
-
 
 class EvidenceNotFoundError(LookupError):
     """when a requested evidence ID does not exist"""
@@ -24,7 +26,7 @@ class EmbeddingClient(Protocol):
 
 
 class OpenAIEmbeddingClient:
-    """Converts OpenAI embedding responses into the format used by our search code."""
+    """Converts OpenAI embedding responses into the format used by our search code"""
 
     def __init__(self, client: OpenAI) -> None:
         self._client = client
@@ -32,8 +34,10 @@ class OpenAIEmbeddingClient:
     def embed(self, texts: Sequence[str], *, model: str) -> list[list[float]]:
         
         response = self._client.embeddings.create(model=model, input=list(texts))
+        ordered_items = sorted(response.data, key=lambda item: item.index)
         
-        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+        return [item.embedding for item in ordered_items]
+    
 
 
 def _validate_model(model: str) -> str:
@@ -48,24 +52,28 @@ def _embed(
     *,
     model: str,
 ) -> list[list[float]]:
+    
     vectors = client.embed(texts, model=_validate_model(model))
-    # Reject incomplete output before vectors can attach to the wrong evidence rows
+    
     if len(vectors) != len(texts):
         raise ValueError("embedding response count does not match input count")
     if any(not vector for vector in vectors):
         raise ValueError("embedding response contains an empty vector")
+    
     return vectors
 
 
 def _short_excerpt(text: str) -> str:
+    
     normalized = " ".join(text.split())
     if len(normalized) <= EXCERPT_CHARACTERS:
         return normalized
-    return f"{normalized[: EXCERPT_CHARACTERS - 1].rstrip()}…"
+    
+    #return with ellipsis
+    return f"{normalized[: EXCERPT_CHARACTERS - 1].rstrip()}…" 
 
 
 def _cosine_similarity(distance: float) -> float:
-    # Small database rounding errors should not leave the valid -1 to 1 range.
     return max(-1.0, min(1.0, 1.0 - distance))
 
 
@@ -78,6 +86,17 @@ def _to_evidence(record: EvidenceRecord) -> Evidence:
         valid_from=record.valid_from,
         valid_until=record.valid_until,
     )
+
+
+def _searchable_text(record: EvidenceRecord) -> str:
+    """Return the narrative text or structured data used to search one evidence record"""
+
+    if record.supporting_text is not None:
+        return record.supporting_text
+    if record.structured_value is not None:
+        return json.dumps(record.structured_value, sort_keys=True)
+    
+    raise ValueError(f"evidence record {record.id} has no searchable content")
 
 
 def _validate_batch_size(batch_size: int) -> None:
@@ -113,31 +132,31 @@ def embed_missing_evidence(
 
     _validate_batch_size(batch_size)
 
-    # Embed only narrative rows without vectors to avoid repeat cost
+    # use limit for memory saving
     statement = (
         select(EvidenceRecord)
-        .where(EvidenceRecord.supporting_text.is_not(None))
         .where(EvidenceRecord.embedding.is_(None))
         .order_by(EvidenceRecord.id)
+        .limit(batch_size) 
     )
-    records = list(session.scalars(statement).all())
 
-    for start in range(0, len(records), batch_size):
-        # Batch uncached text while preserving database row order
-        record_batch = records[start : start + batch_size]
+    embedded_count = 0
+    while True:
         
-        narrative_texts = [
-            record.supporting_text
-            for record in record_batch
-            if record.supporting_text is not None
-        ]
-        vectors = _embed(client, narrative_texts, model=model)
-        for record, vector in zip(record_batch, vectors, strict=True):
+        records = list(session.scalars(statement).all())
+        if not records:
+            break
+
+        searchable_texts = [_searchable_text(record) for record in records]
+        vectors = _embed(client, searchable_texts, model=model)
+        for record, vector in zip(records, vectors, strict=True):
             record.embedding = vector
 
-    if records:
+        # Persist this batch so the next query only returns remaining records
         session.flush()
-    return len(records)
+        embedded_count += len(records)
+
+    return embedded_count
 
 
 def search_company_evidence(
@@ -176,19 +195,14 @@ def search_company_evidence(
         )
     statement = statement.order_by(distance).limit(top_k) #top-k distance 
 
+
     hits: list[EvidenceSearchHit] = []
     for record, distance_value in session.execute(statement).all():
-        
-        source_text = record.supporting_text
-        if source_text is None:
-            # Use structured data when normal text is unavailable
-            source_text = json.dumps(record.structured_value, sort_keys=True)
-            
         hits.append(
             EvidenceSearchHit(
                 evidence_id=record.id,
                 evidence_type=EvidenceType(record.evidence_type),
-                supporting_excerpt=_short_excerpt(source_text),
+                supporting_excerpt=_short_excerpt(_searchable_text(record)),
                 score=_cosine_similarity(float(distance_value)),
             )
         )

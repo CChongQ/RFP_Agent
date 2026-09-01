@@ -45,14 +45,37 @@ def test_embed_missing_evidence_caches_vectors() -> None:
     record = _record()
     populated = Mock()
     populated.all.return_value = [record]
+    empty = Mock()
+    empty.all.return_value = []
     session = Mock(spec=Session)
-    session.scalars.return_value = populated
+    session.scalars.side_effect = [populated, empty]
     client = FakeEmbeddingClient([[0.1, 0.2, 0.3]])
 
     assert embed_missing_evidence(session, client, model="mock-embedding") == 1
 
     assert record.embedding == [0.1, 0.2, 0.3]
     assert client.calls == [([record.supporting_text], "mock-embedding")]
+    session.flush.assert_called_once()
+
+
+def test_embed_missing_evidence_supports_structured_data() -> None:
+    # test evidence can be embedded even when it has no normal supporting_text and has only structured JSON data
+    record = _record(evidence_id="CERTIFICATION-TEST-001")
+    record.supporting_text = None
+    record.structured_value = {"certification": "SOC 2"}
+
+    populated = Mock()
+    populated.all.return_value = [record]
+    empty = Mock()
+    empty.all.return_value = []
+    session = Mock(spec=Session)
+    session.scalars.side_effect = [populated, empty]
+    client = FakeEmbeddingClient([[0.7, 0.8, 0.9]])
+
+    assert embed_missing_evidence(session, client, model="mock-embedding") == 1
+
+    assert client.calls == [(['{"certification": "SOC 2"}'], "mock-embedding")]
+    assert record.embedding == [0.7, 0.8, 0.9]
     session.flush.assert_called_once()
 
 

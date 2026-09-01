@@ -36,6 +36,9 @@ ANALYSIS_RUN_STATUSES = (
     ANALYSIS_STATUS_FAILED,
 )
 
+"""
+Defines PostgreSQL database models for storing tenders, extracted requirements, company evidence, analysis runs, and decisions
+"""
 
 def _sql_string_list(values: Sequence[str]) -> str:
     """Format trusted enum values for SQL check constraints"""
