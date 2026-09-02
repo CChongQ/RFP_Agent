@@ -1,0 +1,247 @@
+# Evidence-First RFP Qualification Agent
+
+An **evidence-first service** that helps proposal teams **review tenders** before investing significant time in a bid.
+
+## The Problem We’re Trying to Solve
+
+RFPs can span **dozens or hundreds of pages**, with important requirements **scattered** across technical sections, appendices, and legal terms. Their language is often **nuanced**: mandatory conditions may be implied, exceptions may appear elsewhere, and the same concept may be described using different terminology.
+
+Before preparing a response, a proposal team needs to understand for example:
+
+- Which requirements are mandatory?
+- What company evidence supports each requirement?
+- Which requirements are unmet, ambiguous, or risky?
+- Is the opportunity worth bidding on?
+
+Manual review is slow and inconsistent. This project uses LLM and deterministic checks to help organize the requirements, connect them with stored company evidence, and highlight uncertain conclusions for human review.
+
+## Why AI, Retrieval, and Deterministic Rules?
+
+I designed the system so that each part has a limited responsibility:
+
+| Part | Responsibility |
+|---|---|
+| LLM | Extract requirements, propose supported rule candidates, and assess qualitative evidence |
+| Evidence retrieval | Find relevant stored company evidence without sending the entire evidence store in every prompt |
+| Deterministic rules | Calculate exact counts, thresholds, allowed values, and validity results |
+| Application policy | Validate model output, enforce safeguards, and produce the final recommendation |
+
+Tender requirements can be written in many different ways, so keyword matching alone is not enough. The LLM interprets the wording and returns structured business concepts, but it does not query the database, generate SQL, or invent company evidence.
+
+For example, if a tender requires at least three qualifying projects:
+
+1. The LLM identifies a minimum project-count requirement.
+2. PostgreSQL finds two matching project records.
+3. Python compares `2` with the required minimum of `3`.
+4. The result is sent to Human Review.
+
+When a requirement cannot be traced or checked safely, the system requests human review rather than guessing.
+
+## Current Version Overview
+
+Version 1 accepts a tender PDF, extracts traceable requirements, compares them with stored company evidence, and returns a `Bid`, `No-Bid`, or `Human Review` recommendation.
+
+The synchronous API entry point is:
+
+```text
+POST /api/v1/analyses
+```
+
+The request currently accepts only:
+
+```json
+{
+  "tender_id": "TENDER-001"
+}
+```
+
+### Current Scope
+
+| Supported | Current boundary |
+|---|---|
+| One accepted tender | `TENDER-001` only |
+| One company evidence store | No multi-company or tenant separation |
+| Text-based PDF extraction | No OCR or scanned-document processing |
+| Semantic evidence retrieval | Evidence must be seeded before analysis |
+| Five deterministic rule operators | No arbitrary or model-generated code |
+| Synchronous analysis endpoint | A request can take several minutes |
+
+## Overall Project Flow
+
+| Stage | What happens |
+|---|---|
+| 1. Validate request | FastAPI and Pydantic validate the request and tender ID. |
+| 2. Resolve tender | `TenderCatalog` finds the accepted manifest record and PDF. |
+| 3. Prepare evidence | The application confirms that evidence exists and creates missing embeddings. |
+| 4. Extract PDF | The PDF service extracts pages, text blocks, bounding boxes, and a file hash. |
+| 5. Extract requirements | The model returns structured requirements, source block IDs, and optional rule candidates. |
+| 6. Validate provenance | Application code validates block IDs, rebuilds excerpts, and assigns stable IDs. |
+| 7. Retrieve evidence | Semantic search finds relevant evidence; exact rules query structured values directly. |
+| 8. Evaluate | Python runs deterministic checks, and the model assesses qualitative evidence. |
+| 9. Apply policy | Application-owned policy produces requirement decisions and an overall recommendation. |
+| 10. Persist and respond | Requirements, decisions, trace data, and run status are stored in one transaction. |
+
+## How Current Version Works
+
+### Tender and PDF Handling
+
+- `data/tenders/manifest.csv` lists accepted tenders and their expected file hashes.
+- Source PDFs are stored under `data/tenders/raw/`.
+- A PDF hash must match the manifest before analysis continues.
+- Each extracted text block receives an application-generated ID and bounding box.
+
+### Requirement Extraction and Provenance
+
+- Pages are sent to the requirement model in chunks of complete pages.
+- The model response is parsed into Pydantic schemas instead of free-form text.
+- The model selects source block IDs from the current chunk.
+- Application code rejects unknown, duplicate, or out-of-chunk block IDs.
+- Stored excerpts are rebuilt from the original blocks rather than model-rewritten text.
+- Requirement and rule IDs are generated by the application.
+
+### Company Evidence
+
+Version 1 stores all company evidence in one PostgreSQL `evidence` table. Evidence is loaded from the validated seed file at:
+
+```text
+data/company/seed/test_company.json
+```
+
+Each evidence record can contain:
+
+- an evidence ID;
+- an evidence type;
+- narrative supporting text;
+- structured JSON values;
+- validity dates;
+- an embedding for semantic search.
+
+The seed command updates or inserts records by evidence ID.
+
+### Evidence Retrieval
+
+Version 1 uses two evidence paths:
+
+| Path | Purpose |
+|---|---|
+| Semantic retrieval | Find evidence related to a requirement using embeddings and pgvector. |
+| Exact rule query | Count records or read structured values using parameterized SQLAlchemy queries. |
+
+Search results contain short previews. The decision service loads the complete stored records before asking the model to assess them.
+
+### Deterministic Rules
+
+Version 1 supports five operators:
+
+- `minimum_count`
+- `minimum_value`
+- `allowed_value`
+- `valid_until`
+- `certification_validity`
+
+Approved structured fields are intentionally limited:
+
+| Evidence type | Approved `structured_value` fields |
+|---|---|
+| `company_profile` | `employee_count`, `headquarters` |
+| `project` | `contract_value`, `industry` |
+| `certification` | `name`, `status` |
+| `capability`, `policy` | None |
+
+Evidence types are restricted by an enum. The model returns business concepts such as `project` or `company_profile`. Structured field names are strings, so `RuleEvidenceService` checks them against the allow-list before building a query. Unknown fields produce Human Review without running the query.
+
+Rule execution follows this sequence:
+
+```text
+RuleSpec -> RuleEvidenceService -> RuleEvidenceValue -> DeterministicRuleEvaluator -> result
+```
+
+PostgreSQL performs exact counts. Python performs comparisons and combines multiple rules using flat `AND` behavior.
+
+### Decision Policy
+
+Application code owns the final decision policy. Its safeguards include:
+
+- a satisfied decision must cite stored evidence;
+- model-selected evidence IDs must exist in the retrieved records;
+- a failed automatically proposed rule requires Human Review rather than an immediate No-Bid;
+- an unclear deterministic result cannot be overridden by the model;
+- unresolved mandatory requirements produce Human Review.
+
+### Persistence and Trace
+
+PostgreSQL stores:
+
+| Table | Contents |
+|---|---|
+| `tenders` | Accepted tender identity and source metadata |
+| `requirements` | Extracted requirements and source references |
+| `evidence` | Company evidence and embeddings |
+| `analysis_runs` | Run status, recommendation, and trace |
+| `decisions` | Requirement decisions, evidence IDs, and rule results |
+
+The trace includes the document hash, model and prompt versions, token counts, requirement IDs, source block IDs, evidence calls, latency, and errors. The current implementation records estimated cost as zero because model pricing is not calculated.
+
+Decisions store a compact final rule result.
+
+## Project Layout
+
+```text
+backend/app/
+├── api/                 HTTP routes, dependencies, and error mapping
+├── core/                Environment-backed settings
+├── database/            SQLAlchemy models, engine, and sessions
+├── prompts/             Versioned model instructions
+├── schemas/             Pydantic API and domain contracts
+├── services/            Extraction, retrieval, rules, decisions, and orchestration
+└── main.py              FastAPI application
+
+backend/tests/
+├── unit/                Offline behavior tests
+└── integration/         PostgreSQL and explicitly enabled API tests
+
+alembic/                 Database migrations
+data/                    Local tender and fictional company inputs
+scripts/                 Evidence seeding and developer commands
+```
+
+## Environment Setup
+
+Requirements:
+
+- Python 3.12
+- Docker with Docker Compose
+- An OpenAI API key
+
+From the repository root, install the application:
+
+```powershell
+python -m pip install -e ".[api,dev]"
+```
+
+Copy `.env.example` to `.env` and provide local values for:
+
+```text
+DATABASE_PASSWORD
+DATABASE_URL
+OPENAI_API_KEY
+OPENAI_MODEL
+OPENAI_EMBEDDING_MODEL
+ENABLE_EXTERNAL_API_CALLS=true
+```
+
+Prepare PostgreSQL and the fictional company evidence:
+
+```powershell
+docker compose up -d db
+python -m alembic upgrade head
+python scripts/seed_company_data.py
+```
+
+Start the API:
+
+```powershell
+fastapi dev backend/app/main.py
+```
+
+Open `http://127.0.0.1:8000/docs` to submit a Version 1 analysis request.
