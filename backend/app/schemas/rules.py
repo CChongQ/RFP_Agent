@@ -14,7 +14,7 @@ type RuleFilterValue = str | int | float | bool
 
 
 class RuleOperator(StrEnum):
-    """supported deterministic checks"""
+    """deterministic checks supported by this system"""
 
     MINIMUM_COUNT = "minimum_count"
     MINIMUM_VALUE = "minimum_value"
@@ -23,29 +23,34 @@ class RuleOperator(StrEnum):
     CERTIFICATION_VALIDITY = "certification_validity"
 
 
+# ========== Evidence selection  ==========
+
 class EvidenceFilter(SchemaModel):
-    """Match one evidence field to an expected value"""
+    """Filter evidence records whose specified field matches the expected value."""
 
     field: NonEmptyString
     equals: RuleFilterValue
 
 
 class EvidenceSelector(SchemaModel):
-    """Describes which stored evidence records a rule needs."""
+    """Select evidence records by evidence type and optional field filters."""
 
     evidence_type: EvidenceType
     filters: list[EvidenceFilter] = Field(default_factory=list)
 
 
+
+# ========== Supported deterministic checks ==========
+
 class MinimumCountCheck(SchemaModel):
-    """Checks the number of matching records meets a minimum"""
+    """Check the number of matching records meets a minimum"""
 
     operator: Literal[RuleOperator.MINIMUM_COUNT]
     minimum: Annotated[StrictInt, Field(ge=0)]
 
 
 class MinimumValueCheck(SchemaModel):
-    """Checks a numeric value meets a minimum."""
+    """Check a numeric value meets a minimum"""
 
     operator: Literal[RuleOperator.MINIMUM_VALUE]
     value_field: NonEmptyString
@@ -60,7 +65,7 @@ class MinimumValueCheck(SchemaModel):
 
 
 class AllowedValueCheck(SchemaModel):
-    """Checks a value appears in an allow-list"""
+    """Check a value appears in an allow-list"""
 
     operator: Literal[RuleOperator.ALLOWED_VALUE]
     value_field: NonEmptyString
@@ -68,18 +73,19 @@ class AllowedValueCheck(SchemaModel):
 
 
 class ValidUntilCheck(SchemaModel):
-    """Checks evidence expiry against the analysis date"""
+    """Check evidence expiry against the analysis date."""
 
     operator: Literal[RuleOperator.VALID_UNTIL]
 
 
 class CertificationValidityCheck(SchemaModel):
-    """Checks certification status and expiry"""
+    """Check certification status and expiry."""
 
     operator: Literal[RuleOperator.CERTIFICATION_VALIDITY]
 
 
-# The operator lets Pydantic choose and validate the matching check model.
+# ========== Complete rule models ==========
+
 type RuleCheck = Annotated[
     MinimumCountCheck
     | MinimumValueCheck
@@ -91,7 +97,7 @@ type RuleCheck = Annotated[
 
 
 class RuleCandidate(SchemaModel):
-    """Represents a check rule proposed by model during requirement extraction"""
+    """Represent a check rule proposed by the model during requirement extraction."""
 
     subject: NonEmptyString
     evidence_selector: EvidenceSelector
@@ -99,7 +105,7 @@ class RuleCandidate(SchemaModel):
 
 
 class RuleSpec(SchemaModel):
-    """Combines a check with the evidence it should inspect"""
+    """Combine a check with the evidence it should inspect."""
 
     rule_id: NonEmptyString
     subject: NonEmptyString

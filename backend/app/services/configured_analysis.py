@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Protocol
 
@@ -24,6 +25,8 @@ from app.services.evidence_retrieval import (
 )
 from app.services.model_usage import ModelUsageTracker
 from app.services.requirement_extractor import OpenAIRequirementModelClient
+from app.services.rule_evaluator import DeterministicRuleEvaluator
+from app.services.rule_evidence import RuleEvidenceService
 
 logger = logging.getLogger(__name__)
 
@@ -160,12 +163,18 @@ class ConfiguredAnalysisRunner:
             min_score=settings.min_retrieval_score,
         )
         assessment_client = OpenAIEvidenceAssessmentClient(client, usage_tracker)
+        # Exact rules query structured evidence independently of semantic search.
+        rule_evaluator = DeterministicRuleEvaluator(
+            RuleEvidenceService(self._session),
+            as_of=date.today(),
+        )
         
         #build decision service 
         decision_service = DecisionService(
             evidence_reader,
             assessment_client,
             model=model_config.model,
+            rule_evaluator=rule_evaluator,
             top_k=settings.retrieval_top_k,
         )
         

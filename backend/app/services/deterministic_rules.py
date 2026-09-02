@@ -7,7 +7,6 @@ from app.schemas import DeterministicRuleResult, RuleOutcome
 """Apply deterministic rule checks to evidence"""
 
 
-
 type Numeric = Decimal | int | float
 
 RULE_VALID_UNTIL = "valid_until"

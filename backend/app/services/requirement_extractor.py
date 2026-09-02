@@ -11,6 +11,8 @@ from app.schemas.requirement import Requirement, SourceReference
 from app.schemas.rules import RuleCandidate, RuleSpec
 from app.services.model_usage import ModelUsageTracker
 
+"""Extract structured, traceable requirements and deterministic rules from PDF pages using an LLM client"""
+
 PAGE_SEPARATOR = "\n\n"
 
 
@@ -23,6 +25,8 @@ class RequirementExtractionChunk:
     input_text: str
     source_block_ids: frozenset[str]
 
+
+# ========== Requirement model client ==========
 
 class RequirementModelClient(Protocol):
     """Defines the model boundary used by the extraction service"""
@@ -76,6 +80,8 @@ class OpenAIRequirementModelClient:
         return response.output_parsed
 
 
+# ========== Page formatting and chunking ==========
+
 def _format_page(page: ExtractedPage) -> str:
     """For model input, format one PDF page and its blocks with block id"""
 
@@ -100,7 +106,7 @@ def _build_page_chunks(
     pages: Sequence[ExtractedPage],
     max_chunk_characters: int,
 ) -> list[RequirementExtractionChunk]:
-    """Combine consecutive PDF pages into chunks without splitting a page.
+    """Combine consecutive PDF pages into chunks, without splitting a page.
     
     Example: Page 1 has 4k chars, Page 2 has 5k chars; with 10k limit -> Chunk 1 has 9k chars
     """
@@ -123,6 +129,7 @@ def _build_page_chunks(
         )
         
         if chunk_pages and would_exceed_limit:
+            #exceed limit, start a new chunk first 
             chunks.append(
                 RequirementExtractionChunk(
                     input_text=PAGE_SEPARATOR.join(chunk_pages),
@@ -148,10 +155,12 @@ def _build_page_chunks(
     return chunks
 
 
+# ========== Source block validation and tracing ==========
+
 def _index_source_blocks(
     pages: Sequence[ExtractedPage],
 ) -> tuple[dict[str, ExtractedBlock], dict[str, tuple[int, int]]]:
-    """Index each source block by ID and record its page and position in  PDF"""
+    """Index each source block by ID and record its page and position in PDF"""
     
     page_numbers = [page.page_number for page in pages]
     if len(set(page_numbers)) != len(page_numbers):
@@ -218,6 +227,8 @@ def _resolve_candidate_source(
     return selected_blocks[0].page_number, source_excerpt, source_references
 
 
+# ========== Requirement and rule construction ==========
+
 def _build_requirement(
     candidate: ExtractedRequirementCandidate,
     *,
@@ -259,6 +270,8 @@ def _build_rule_specs(
         for rule_number, candidate in enumerate(candidates, start=1)
     ]
 
+
+# ========== Requirement extraction orchestration ==========
 
 def extract_requirements(
     pages: Sequence[ExtractedPage],

@@ -74,14 +74,13 @@ class EvidenceAssessmentClient(Protocol):
 
 
 class RuleEvaluator(Protocol):
-    """Defines the optional labeled deterministic rule for a requirement"""
+    """Defines deterministic evaluation for rules attached to a requirement"""
 
     def evaluate(
         self,
         requirement: Requirement,
-        evidence: Sequence[Evidence],
     ) -> DeterministicRuleResult | None:
-        """Run a fixed rule check when the requirement supports one"""
+        """Run the requirement's validated rules when present"""
 
         ...
 
@@ -246,7 +245,7 @@ class DecisionService:
         evidence, get_tool_calls = self._load_unique_evidence(requirement, hits)
         
         tool_calls.extend(get_tool_calls)
-        rule_result = self._evaluate_rule(requirement, evidence)
+        rule_result = self._evaluate_rule(requirement)
         assessment = self._assess_evidence(requirement, evidence)
         
         decision = _enforce_decision_policy(
@@ -279,13 +278,12 @@ class DecisionService:
     def _evaluate_rule(
         self,
         requirement: Requirement,
-        evidence: Sequence[Evidence],
     ) -> DeterministicRuleResult | None:
-        """Run the optional fixed rule check for one requirement"""
+        """Run the optional deterministic rules for one requirement"""
 
         if self._rule_evaluator is None:
             return None
-        return self._rule_evaluator.evaluate(requirement, evidence)
+        return self._rule_evaluator.evaluate(requirement)
 
     def _assess_evidence(
         self,
@@ -373,7 +371,8 @@ def _apply_status_policy(
     """Choose the status after applying rule and review safeguards"""
 
     if rule_result is not None and rule_result.outcome is RuleOutcome.FAILED:
-        return DecisionStatus.NOT_SATISFIED, rule_result.reason
+        # Model-proposed rules are reviewed before they can cause a definite rejection.
+        return DecisionStatus.REQUIRES_HUMAN_REVIEW, rule_result.reason
     
     if (
         rule_result is not None

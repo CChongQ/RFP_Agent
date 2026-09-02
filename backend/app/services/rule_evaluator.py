@@ -28,8 +28,8 @@ Note:
 
 
 class DeterministicRuleEvaluator:
-    """Connect requirement rules to exact evidence and deterministic checks"""
-
+    """ Compares that evidence against the rule, and provide a deterministic result(pass, fail, or human review) """
+    
     def __init__(self, evidence_service: RuleEvidenceService, *, as_of: date) -> None:
         self._evidence_service = evidence_service
         self._as_of = as_of
@@ -45,6 +45,7 @@ class DeterministicRuleEvaluator:
 
     def _evaluate_rule(self, rule: RuleSpec) -> DeterministicRuleResult:
         
+        #get evidences that needed for the rule
         evidence = self._evidence_service.read(rule)
         if evidence.problem is not None:
             return _human_review(rule, evidence.problem)
@@ -86,6 +87,7 @@ class DeterministicRuleEvaluator:
             return _human_review(rule, "stored evidence count is not an int")
         else:
             actual = value
+            
         return validate_minimum(
             actual,
             check.minimum,
@@ -108,6 +110,7 @@ class DeterministicRuleEvaluator:
             return _human_review(rule, "stored evidence value is not numeric")
         else:
             actual = value
+            
         return validate_minimum(
             actual,
             check.minimum,
@@ -130,6 +133,7 @@ class DeterministicRuleEvaluator:
             return _human_review(rule, "stored evidence value is not text")
         else:
             actual = value
+            
         return validate_allowed_value(
             actual,
             check.allowed_values,

@@ -1,3 +1,5 @@
+"""Read the exact stored evidence value required by a deterministic rule."""
+
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
@@ -20,8 +22,7 @@ from app.schemas.rules import (
     ValidUntilCheck,
 )
 
-"""Read the exact stored evidence value required by a deterministic rule."""
-
+# ========== Evidence value and approved fields ==========
 
 type RuleEvidenceScalar = str | int | float | bool | Decimal
 
@@ -46,7 +47,10 @@ class RuleEvidenceValue:
     problem: str | None = None
 
 
+# ========== Evidence query service ==========
+
 class RuleEvidenceService:
+    """Query database for the values needed to evaluate a rule"""
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -54,15 +58,18 @@ class RuleEvidenceService:
     def read(self, rule: RuleSpec) -> RuleEvidenceValue:
         """Return only the stored value needed to evaluate one rule"""
 
-        problem = _rule_query_problem(rule)
+        # Check whether the rule can be safely converted into a query.
+        problem = _check_rule_query_problem(rule)
         if problem is not None:
             return RuleEvidenceValue(problem=problem)
 
-        conditions = _selector_conditions(rule.evidence_selector)
+        #constructs conditions from a selector
+        conditions = _build_selector_conditions(rule.evidence_selector)
+        
         check = rule.check
-
         if isinstance(check, MinimumCountCheck):
             statement = select(func.count()).select_from(EvidenceRecord).where(*conditions)
+
             count = self._session.scalar(statement)
             return RuleEvidenceValue(value=int(count or 0))
 
@@ -84,7 +91,7 @@ class RuleEvidenceService:
     ) -> RuleEvidenceValue:
         """Reads one JSON field"""
         
-        query_expression = _structured_field(field)
+        query_expression = _build_structured_field_expression(field)
         
         statement = select(query_expression).where(*conditions).distinct().limit(2)
         values = list(self._session.scalars(statement).all())
@@ -113,7 +120,7 @@ class RuleEvidenceService:
         conditions: list[ColumnElement[bool]],
     ) -> RuleEvidenceValue:
         
-        status = _structured_field("status").as_string()
+        status = _build_structured_field_expression("status").as_string()
         
         statement = (
             select(status, EvidenceRecord.valid_until)
@@ -134,8 +141,10 @@ class RuleEvidenceService:
         return RuleEvidenceValue(status=status_value, valid_until=valid_until)
 
 
-def _rule_query_problem(rule: RuleSpec) -> str | None:
-    """Explain why a rule cannot be converted into a safe exact query."""
+# ========== Rule query validation ==========
+
+def _check_rule_query_problem(rule: RuleSpec) -> str | None:
+    """Check if and why a rule cannot be converted into a safe exact query"""
 
     selector = rule.evidence_selector
     fields = [item.field for item in selector.filters]
@@ -161,8 +170,10 @@ def _rule_query_problem(rule: RuleSpec) -> str | None:
     return f"evidence field is not approved: {unsupported_field}"
 
 
-def _selector_conditions(selector: EvidenceSelector) -> list[ColumnElement[bool]]:
-    """Build safe equality conditions from a validated evidence selector."""
+# ========== Evidence selector conditions ==========
+
+def _build_selector_conditions(selector: EvidenceSelector) -> list[ColumnElement[bool]]:
+    """Build conditions from a validated evidence selector"""
 
     conditions: list[ColumnElement[bool]] = [
         EvidenceRecord.evidence_type == selector.evidence_type.value
@@ -178,11 +189,13 @@ def _filter_condition(item: EvidenceFilter) -> ColumnElement[bool]:
     return cast(ColumnElement[bool], condition)
 
 
-def _structured_field(field: str) -> Any:
+def _build_structured_field_expression(field: str) -> Any:
     """Create a SQL expression for one field in the structured_value JSON column."""
 
     return EvidenceRecord.structured_value[field]
 
+
+# ========== Query result normalization ==========
 
 def _single_scalar_value(values: list[object]) -> RuleEvidenceValue:
     """Return one distinct scalar or describe why it is unclear."""
