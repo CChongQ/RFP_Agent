@@ -4,6 +4,7 @@ from pydantic import Field, model_validator
 
 from app.schemas.base import NonEmptyString, SchemaModel
 from app.schemas.enums import RequirementType
+from app.schemas.rules import RuleSpec
 
 
 class SourceReference(SchemaModel):
@@ -29,6 +30,7 @@ class Requirement(SchemaModel):
     source_page: Annotated[int, Field(ge=1)]
     source_excerpt: NonEmptyString
     source_references: list[SourceReference] = Field(min_length=1)
+    rules: list[RuleSpec] = Field(default_factory=list)
     requires_human_review: bool = False
 
     @model_validator(mode="after")

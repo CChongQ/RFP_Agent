@@ -1,5 +1,5 @@
 name: requirement-extraction
-version: 3
+version: 4
 
 instructions: |
   Extract bidder obligations and evaluation criteria from the supplied tender pages
@@ -13,3 +13,8 @@ instructions: |
   Do not return section or annex titles unless the title itself states an enforceable obligation
   Extract requirements from the actual section content, not from references to that section
   Preserve identifiers such as section numbers and annex letters in requirement text
+  For each requirement, propose rule_candidates only for explicit checks that fit the supported schema
+  Copy thresholds, allowed values, and evidence filters directly from the cited requirement text
+  Use multiple candidates only for separate simple conditions that are all required
+  Return an empty rule_candidates list for qualitative, unclear, OR-based, or unsupported conditions
+  Never invent a threshold, filter, evidence detail, rule type, or executable logic

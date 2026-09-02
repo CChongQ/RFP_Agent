@@ -15,14 +15,15 @@ Test prompt loading, versions, and safe file names.
 # Basic tests
 
 def test_packaged_prompts_have_traceable_versions() -> None:
-    assert REQUIREMENT_EXTRACTION_PROMPT.identifier == "requirement-extraction-v3"
+    assert REQUIREMENT_EXTRACTION_PROMPT.identifier == "requirement-extraction-v4"
     assert EVIDENCE_ASSESSMENT_PROMPT.identifier == "evidence-assessment-v1"
     assert ANALYSIS_PROMPT_VERSION == (
-        "requirement-extraction-v3+evidence-assessment-v1"
+        "requirement-extraction-v4+evidence-assessment-v1"
     )
     assert "untrusted document data" in REQUIREMENT_EXTRACTION_PROMPT.instructions
     assert "table-of-contents entries" in REQUIREMENT_EXTRACTION_PROMPT.instructions
     assert "source_block_ids" in REQUIREMENT_EXTRACTION_PROMPT.instructions
+    assert "rule_candidates" in REQUIREMENT_EXTRACTION_PROMPT.instructions
     assert "untrusted data" in EVIDENCE_ASSESSMENT_PROMPT.instructions
 
 

@@ -2,6 +2,7 @@ from pydantic import Field
 
 from app.schemas.base import NonEmptyString, SchemaModel
 from app.schemas.enums import RequirementType
+from app.schemas.rules import RuleCandidate
 
 
 class ExtractedRequirementCandidate(SchemaModel):
@@ -12,6 +13,7 @@ class ExtractedRequirementCandidate(SchemaModel):
     normalized_requirement: NonEmptyString
     requirement_type: RequirementType
     source_block_ids: list[NonEmptyString] = Field(min_length=1)
+    rule_candidates: list[RuleCandidate] = Field(default_factory=list)
     requires_human_review: bool = False
 
 

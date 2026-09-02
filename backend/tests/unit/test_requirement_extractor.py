@@ -8,6 +8,8 @@ from app.schemas import (
     ExtractedRequirementCandidate,
     RequirementExtractionBatch,
     RequirementType,
+    RuleCandidate,
+    RuleOperator,
 )
 from app.services.requirement_extractor import (
     RequirementExtractionError,
@@ -57,12 +59,28 @@ def _page(page_number: int, *texts: str) -> ExtractedPage:
     )
 
 
-def _candidate(*block_ids: str) -> ExtractedRequirementCandidate:
+def _candidate(
+    *block_ids: str,
+    rule_candidates: list[RuleCandidate] | None = None,
+) -> ExtractedRequirementCandidate:
     return ExtractedRequirementCandidate(
         requirement_text="The bidder must provide implementation services",
         normalized_requirement="Provide implementation services",
         requirement_type=RequirementType.MANDATORY,
         source_block_ids=list(block_ids),
+        rule_candidates=rule_candidates or [],
+    )
+
+
+def _minimum_count_candidate() -> RuleCandidate:
+    """Build one fictional model-proposed count rule."""
+
+    return RuleCandidate.model_validate(
+        {
+            "subject": "qualifying projects",
+            "evidence_selector": {"evidence_type": "project"},
+            "check": {"operator": "minimum_count", "minimum": 3},
+        }
     )
 
 
@@ -92,7 +110,31 @@ def test_extract_requirements_resolves_exact_source_block() -> None:
     assert requirement.source_page == 1
     assert requirement.source_excerpt == source_text
     assert requirement.source_references[0].block_id == "P001-B002"
+    assert requirement.rules == []
     assert '<source_block id="P001-B002">' in client.calls[0]
+
+
+def test_extract_requirements_assigns_rule_ids_in_application_code() -> None:
+    pages = [_page(1, "The bidder must provide at least three qualifying projects")]
+   
+    candidate = _candidate(
+        "P001-B001",
+        rule_candidates=[_minimum_count_candidate()],
+    )
+    
+    client = FakeRequirementModelClient(
+        [RequirementExtractionBatch(requirements=[candidate])]
+    )
+
+    requirement = extract_requirements(
+        pages,
+        tender_id="TENDER-TEST-001",
+        model="mock-model",
+        client=client,
+    )[0]
+
+    assert requirement.rules[0].rule_id == "TENDER-TEST-001-REQ-001-RULE-001"
+    assert requirement.rules[0].check.operator is RuleOperator.MINIMUM_COUNT
 
 
 def test_extract_requirements_orders_and_joins_multiple_source_blocks() -> None:

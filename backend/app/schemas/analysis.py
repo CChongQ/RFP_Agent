@@ -13,7 +13,7 @@ def _has_duplicates(values: list[str]) -> bool:
 
 
 class CreateAnalysisRequest(SchemaModel):
-    tender_id: Literal["TENDER-001"] # to be changed, after MVP
+    tender_id: Literal["TENDER-001"]  # to be changed, after MVP
 
 
 class ToolCallTrace(SchemaModel):

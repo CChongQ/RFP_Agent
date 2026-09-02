@@ -28,6 +28,11 @@ from app.services.evidence_retrieval import (
 )
 from app.services.model_usage import ModelUsageTracker
 
+"""Build evidence-backed requirement decisions and an overall bid recommendation."""
+
+
+
+
 MANDATORY_REVIEW_STATUSES = frozenset({
     DecisionStatus.PARTIALLY_SATISFIED,
     DecisionStatus.INSUFFICIENT_EVIDENCE,
@@ -237,7 +242,7 @@ class DecisionService:
         
         tool_calls = [search_trace]
         
-        #inspect complete records cuz search excerpts are only retrieval previews
+        # Load complete records because search hits contain only preview excerpts
         evidence, get_tool_calls = self._load_unique_evidence(requirement, hits)
         
         tool_calls.extend(get_tool_calls)
@@ -347,8 +352,16 @@ def _build_assessment_input(
 
 
 def _unique_in_order(values: Sequence[str]) -> list[str]:
-    """Remove dup values while keeping their first-seen order"""
-    return list(dict.fromkeys(values))
+    """Remove duplicate values while keeping their first-seen order."""
+
+    unique_values: list[str] = []
+    seen_values: set[str] = set()
+    for value in values:
+        if value in seen_values:
+            continue
+        seen_values.add(value)
+        unique_values.append(value)
+    return unique_values
 
 
 def _apply_status_policy(
@@ -422,18 +435,18 @@ def _recommend(
 ) -> OverallRecommendation:
     """Choose bid, no-bid, or human review from mandatory decisions"""
 
-    requirements_by_id = {
-        requirement.requirement_id: requirement for requirement in requirements
+    mandatory_requirement_ids = {
+        requirement.requirement_id
+        for requirement in requirements
+        if requirement.requirement_type is RequirementType.MANDATORY
     }
-    
     mandatory_decisions = [
         decision
         for decision in decisions
-        if requirements_by_id[decision.requirement_id].requirement_type
-        is RequirementType.MANDATORY
+        if decision.requirement_id in mandatory_requirement_ids
     ]
     
-    #Note: A definite mandatory failure takes priority over unresolved ambiguity
+    # A definite mandatory failure takes priority over unresolved ambiguity
     if any(
         decision.status is DecisionStatus.NOT_SATISFIED
         for decision in mandatory_decisions

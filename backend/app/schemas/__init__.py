@@ -18,6 +18,14 @@ from app.schemas.extraction import ExtractedRequirementCandidate, RequirementExt
 from app.schemas.pdf import ExtractedBlock, ExtractedPage, PdfExtractionResult
 from app.schemas.requirement import Requirement, SourceReference
 from app.schemas.retrieval import EvidenceSearchHit
+from app.schemas.rules import (
+    EvidenceFilter,
+    EvidenceSelector,
+    RuleCandidate,
+    RuleCheck,
+    RuleOperator,
+    RuleSpec,
+)
 from app.schemas.tender import TenderDocument
 
 __all__ = [
@@ -30,6 +38,8 @@ __all__ = [
     "Evidence",
     "EvidenceAssessment",
     "EvidenceSearchHit",
+    "EvidenceFilter",
+    "EvidenceSelector",
     "EvidenceType",
     "ExtractedBlock",
     "ExtractedPage",
@@ -39,7 +49,11 @@ __all__ = [
     "Requirement",
     "RequirementExtractionBatch",
     "RequirementType",
+    "RuleCandidate",
+    "RuleCheck",
+    "RuleOperator",
     "RuleOutcome",
+    "RuleSpec",
     "SourceReference",
     "TenderDocument",
     "ToolCallTrace",

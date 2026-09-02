@@ -8,6 +8,7 @@ from app.prompts import REQUIREMENT_EXTRACTION_PROMPT
 from app.schemas.extraction import ExtractedRequirementCandidate, RequirementExtractionBatch
 from app.schemas.pdf import ExtractedBlock, ExtractedPage
 from app.schemas.requirement import Requirement, SourceReference
+from app.schemas.rules import RuleCandidate, RuleSpec
 from app.services.model_usage import ModelUsageTracker
 
 PAGE_SEPARATOR = "\n\n"
@@ -227,9 +228,9 @@ def _build_requirement(
     source_references: list[SourceReference],
 ) -> Requirement:
     
-    # safety check: model output cannot change the ID format
+    requirement_id = f"{tender_id}-REQ-{requirement_number:03d}"
     return Requirement(
-        requirement_id=f"{tender_id}-REQ-{requirement_number:03d}",
+        requirement_id=requirement_id,
         tender_id=tender_id,
         requirement_text=candidate.requirement_text,
         normalized_requirement=candidate.normalized_requirement,
@@ -237,8 +238,26 @@ def _build_requirement(
         source_page=source_page,
         source_excerpt=source_excerpt,
         source_references=source_references,
+        rules=_build_rule_specs(requirement_id, candidate.rule_candidates),
         requires_human_review=candidate.requires_human_review,
     )
+
+
+def _build_rule_specs(
+    requirement_id: str,
+    candidates: Sequence[RuleCandidate],
+) -> list[RuleSpec]:
+    """Assign application-owned IDs to validated model-proposed rules."""
+
+    return [
+        RuleSpec(
+            rule_id=f"{requirement_id}-RULE-{rule_number:03d}",
+            subject=candidate.subject,
+            evidence_selector=candidate.evidence_selector,
+            check=candidate.check,
+        )
+        for rule_number, candidate in enumerate(candidates, start=1)
+    ]
 
 
 def extract_requirements(

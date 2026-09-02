@@ -1,5 +1,3 @@
-
-
 from collections.abc import Sequence
 
 from app.schemas import (
