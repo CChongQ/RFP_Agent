@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     app_name: str = DEFAULT_APP_NAME
     app_env: str = "development"
     log_level: str = "INFO"
+    analysis_progress_log_path: Path = Path("./logs/analysis_progress.jsonl")
+    analysis_run_output_dir: Path = Path("./data/evaluation/runs")
 
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8000, ge=1, le=65_535)
@@ -42,6 +44,7 @@ class Settings(BaseSettings):
     max_pdf_mb: int = Field(default=25, ge=1)
     max_pdf_pages: int = Field(default=250, ge=1)
     max_requirement_chunk_characters: int = Field(default=12_000, ge=1)
+    analysis_page_threshold: int = Field(default=50, ge=1)
 
     retrieval_top_k: int = Field(default=5, ge=1, le=50)
     min_retrieval_score: float = Field(default=0.0, ge=-1.0, le=1.0)

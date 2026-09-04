@@ -7,7 +7,7 @@ from enum import StrEnum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from time import perf_counter
-from typing import Protocol, Self
+from typing import Protocol
 
 from pydantic import JsonValue
 
@@ -36,7 +36,7 @@ class ProgressReporter(Protocol):
 
     def precheck_failed(self, error: Exception) -> None: ...
 
-    def bind_analysis(self, analysis_id: str) -> Self: ...
+    def bind_analysis(self, analysis_id: str) -> None: ...
 
     def analysis_started(self) -> None: ...
 
@@ -142,11 +142,7 @@ class AnalysisEventReporter:
             ("total", total),
             ("duration_ms", duration_ms),
         )
-        reserved_fields = record.keys() | {key for key, _ in optional_fields}
-        
-        record.update(
-            (key, value) for key, value in (details or {}).items() if key not in reserved_fields
-        )
+        record.update(details or {})
         record.update((key, value) for key, value in optional_fields if value is not None)
         
         logging.getLogger(PROGRESS_LOGGER_NAME).log(
@@ -187,9 +183,8 @@ class AnalysisEventReporter:
             details={"error_type": type(error).__name__},
         )
 
-    def bind_analysis(self, analysis_id: str) -> Self:
+    def bind_analysis(self, analysis_id: str) -> None:
         self.analysis_id = analysis_id
-        return self
 
     def analysis_started(self) -> None:
         self._started_at = self.clock()
@@ -275,7 +270,7 @@ class AnalysisEventReporter:
     def _elapsed_ms(self, started_at: float | None) -> int | None:
         if started_at is None:
             return None
-        return max(0, round((self.clock() - started_at) * 1000))
+        return round((self.clock() - started_at) * 1000)
 
 
 def _stage_label(stage: AnalysisStage) -> str:

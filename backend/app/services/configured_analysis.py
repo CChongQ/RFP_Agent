@@ -13,6 +13,11 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.database.models import EvidenceRecord
 from app.schemas import AnalysisResult, TenderDocument
+from app.services.analysis_progress import AnalysisEventReporter, AnalysisStage
+from app.services.analysis_result_export import (
+    AnalysisResultExportError,
+    export_analysis_result,
+)
 from app.services.analysis_service import AnalysisService
 from app.services.decision_service import (
     DecisionService,
@@ -73,31 +78,61 @@ class ConfiguredAnalysisRunner:
         self._settings = settings
 
     def run(self, tender: TenderDocument, pdf_path: Path) -> AnalysisResult:
+        reporter = AnalysisEventReporter(tender_id=tender.tender_id)
+        reporter.analysis_started()
         try:
             self._require_company_evidence()
             
             components = self._build_components()
             
             # to be chnage, after MVP
-            embed_missing_evidence(
+            reporter.stage_started(AnalysisStage.EVIDENCE_PREPARATION)
+            embedded_count = embed_missing_evidence(
                 self._session,
                 components.embedding_client,
                 model=components.embedding_model,
                 batch_size=self._settings.evidence_embedding_batch_size,
             )
-            
-            result = components.analysis_service.analyze(tender, pdf_path)
+            reporter.stage_completed(
+                AnalysisStage.EVIDENCE_PREPARATION,
+                details={"evidence_records_embedded": embedded_count},
+            )
+
+            result = components.analysis_service.analyze(
+                tender,
+                pdf_path,
+                progress_reporter=reporter,
+            )
             
             # commit the result and its trace as one unit.
             self._session.commit()
-            
+
+            try:
+                result_path = export_analysis_result(
+                    result,
+                    self._settings.analysis_run_output_dir,
+                )
+                logger.info("Saved analysis comparison result to %s", result_path)
+            except AnalysisResultExportError:
+                logger.exception(
+                    "Could not save analysis comparison result for %s",
+                    result.analysis_id,
+                )
+
+            reporter.stage_completed(AnalysisStage.PERSISTENCE)
+            reporter.analysis_completed(
+                recommendation=result.overall_recommendation.value
+            )
             return result
-        except CompanyEvidenceMissingError:
+        except CompanyEvidenceMissingError as exc:
+            reporter.analysis_failed(exc)
             raise
         except SQLAlchemyError as exc:
             self._session.rollback()
+            reporter.analysis_failed(exc)
             raise AnalysisDatabaseError("analysis database operation failed") from exc
-        except Exception:
+        except Exception as exc:
+            reporter.analysis_failed(exc)
             logger.exception("Analysis failed for tender %s", tender.tender_id)
             self._commit_failed_trace()
             raise

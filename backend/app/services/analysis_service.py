@@ -27,6 +27,12 @@ from app.schemas import (
     ToolCallTrace,
     TraceMetadata,
 )
+from app.services.analysis_progress import (
+    AnalysisEventReporter,
+    AnalysisStage,
+    ProgressReporter,
+    ProgressReporterFactory,
+)
 from app.services.decision_service import DecisionServiceResult
 from app.services.model_usage import ModelUsageSnapshot, ModelUsageTracker, usage_since
 from app.services.pdf_extractor import extract_pdf
@@ -61,13 +67,19 @@ class RequirementExtractor(Protocol):
         model: str,
         client: RequirementModelClient,
         max_chunk_characters: int,
+        progress_reporter: ProgressReporter | None = None,
     ) -> list[Requirement]:
         """Turn extracted PDF pages into validated requirements"""
         ...
 
 
 class DecisionRunner(Protocol):
-    def decide(self, requirements: Sequence[Requirement]) -> DecisionServiceResult:
+    def decide(
+        self,
+        requirements: Sequence[Requirement],
+        *,
+        progress_reporter: ProgressReporter | None = None,
+    ) -> DecisionServiceResult:
         """Create decisions and an overall recommendation"""
         ...
 
@@ -98,6 +110,7 @@ class AnalysisService:
         pdf_extractor: PdfExtractor = extract_pdf,
         requirement_extractor: RequirementExtractor = extract_requirements,
         analysis_id_factory: Callable[[], str] | None = None,
+        progress_reporter_factory: ProgressReporterFactory = AnalysisEventReporter,
         clock: Callable[[], float] = perf_counter,
     ) -> None:
 
@@ -118,10 +131,17 @@ class AnalysisService:
         self._pdf_extractor = pdf_extractor
         self._requirement_extractor = requirement_extractor
         self._analysis_id_factory = analysis_id_factory or _new_analysis_id
+        self._progress_reporter_factory = progress_reporter_factory
         self._clock = clock
         self._prompt_version = ANALYSIS_PROMPT_VERSION
 
-    def analyze(self, tender: TenderDocument, pdf_path: Path) -> AnalysisResult:
+    def analyze(
+        self,
+        tender: TenderDocument,
+        pdf_path: Path,
+        *,
+        progress_reporter: ProgressReporter | None = None,
+    ) -> AnalysisResult:
         """Run the vertical slice and flush its records in the caller transaction"""
 
         progress = AnalysisProgress(
@@ -130,14 +150,40 @@ class AnalysisService:
         )
         
         analysis_id = self._analysis_id_factory()
-        self._persist_tender(tender)
-        analysis_record = self._start_analysis_record(analysis_id, tender)
+        
+        #for report 
+        owns_reporter = progress_reporter is None
+        reporter = progress_reporter or self._progress_reporter_factory(
+            tender_id=tender.tender_id
+        )
+        reporter.bind_analysis(analysis_id)
+        if owns_reporter:
+            reporter.analysis_started()
 
+        analysis_record: AnalysisRunRecord | None = None
         try:
+            self._persist_tender(tender)
+            analysis_record = self._start_analysis_record(analysis_id, tender)
+            reporter.stage_started(AnalysisStage.PDF_EXTRACTION)
             extraction = self._extract_pdf(tender, pdf_path)
+            reporter.stage_completed(
+                AnalysisStage.PDF_EXTRACTION,
+                message=f"PDF extraction completed: {extraction.page_count} pages",
+                details={
+                    "file_size_bytes": extraction.file_size_bytes,
+                    "extracted_characters": extraction.total_characters,
+                },
+            )
             
             #get requirements
-            requirements = self._extract_requirements(tender, extraction)
+            requirements = self._requirement_extractor(
+                extraction.pages,
+                tender_id=tender.tender_id,
+                model=self._model,
+                client=self._requirement_client,
+                max_chunk_characters=self._max_chunk_characters,
+                progress_reporter=reporter,
+            )
             progress.requirement_ids = [item.requirement_id for item in requirements]
             progress.requirement_source_block_ids = {
                 item.requirement_id: [
@@ -148,7 +194,10 @@ class AnalysisService:
             self._persist_requirements(requirements)
             
             #make decision
-            decision_result = self._decision_service.decide(requirements)
+            decision_result = self._decision_service.decide(
+                requirements,
+                progress_reporter=reporter,
+            )
             
             #make analysis 
             progress.tool_calls = decision_result.tool_calls
@@ -162,13 +211,17 @@ class AnalysisService:
             )
             
             #save result
+            reporter.stage_started(AnalysisStage.PERSISTENCE)
             self._complete_analysis_record(analysis_record, result)
             self._persist_decisions(analysis_id, decision_result)
             
             self._session.flush()
             return result
         except Exception as exc:
-            self._mark_analysis_failed(analysis_record, tender, progress, exc)
+            if owns_reporter:
+                reporter.analysis_failed(exc)
+            if analysis_record is not None:
+                self._mark_analysis_failed(analysis_record, tender, progress, exc)
             raise
 
     def _persist_tender(self, tender: TenderDocument) -> None:
@@ -211,7 +264,7 @@ class AnalysisService:
         """Extract PDF and confirm that its hash matches the record"""
 
         extraction = self._pdf_extractor(
-            Path(pdf_path),
+            pdf_path,
             max_pdf_mb=self._max_pdf_mb,
             max_pdf_pages=self._max_pdf_pages,
         )
@@ -221,21 +274,6 @@ class AnalysisService:
                 "PDF hash does not match the selected tender manifest record"
             )
         return extraction
-
-    def _extract_requirements(
-        self,
-        tender: TenderDocument,
-        extraction: PdfExtractionResult,
-    ) -> list[Requirement]:
-        """Extract structured requirements from the PDF pages"""
-
-        return self._requirement_extractor(
-            extraction.pages,
-            tender_id=tender.tender_id,
-            model=self._model,
-            client=self._requirement_client,
-            max_chunk_characters=self._max_chunk_characters,
-        )
 
     def _build_result(
         self,
@@ -275,7 +313,7 @@ class AnalysisService:
             document_sha256=document_sha256,
             model_version=self._model,
             prompt_version=self._prompt_version,
-            latency_ms=self._elapsed_ms(progress.started_at),
+            latency_ms=round((self._clock() - progress.started_at) * 1000),
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
             estimated_cost_usd=usage.estimated_cost_usd,
@@ -360,10 +398,6 @@ class AnalysisService:
                     ),
                 )
             )
-
-    def _elapsed_ms(self, started_at: float) -> int:
-        return max(0, round((self._clock() - started_at) * 1000))
-
 
 def _new_analysis_id() -> str:
     return f"ANALYSIS-{uuid4()}"

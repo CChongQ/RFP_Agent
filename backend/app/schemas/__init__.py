@@ -1,4 +1,6 @@
 from app.schemas.analysis import (
+    AnalysisPrecheck,
+    AnalysisPrecheckRequest,
     AnalysisResult,
     CreateAnalysisRequest,
     ToolCallTrace,
@@ -14,8 +16,21 @@ from app.schemas.enums import (
     RuleOutcome,
 )
 from app.schemas.evidence import Evidence
-from app.schemas.extraction import ExtractedRequirementCandidate, RequirementExtractionBatch
-from app.schemas.pdf import ExtractedBlock, ExtractedPage, PdfExtractionResult
+from app.schemas.extraction import (
+    ExtractedEvidenceFilter,
+    ExtractedRequirementCandidate,
+    ExtractedRuleCandidate,
+    ExtractedRuleParameter,
+    ExtractedRuleParameterName,
+    ExtractedScalarType,
+    RequirementExtractionBatch,
+)
+from app.schemas.pdf import (
+    ExtractedBlock,
+    ExtractedPage,
+    PdfExtractionResult,
+    PdfInspectionResult,
+)
 from app.schemas.requirement import Requirement, SourceReference
 from app.schemas.retrieval import EvidenceSearchHit
 from app.schemas.rules import (
@@ -29,6 +44,8 @@ from app.schemas.rules import (
 from app.schemas.tender import TenderDocument
 
 __all__ = [
+    "AnalysisPrecheck",
+    "AnalysisPrecheckRequest",
     "AnalysisResult",
     "CompanyEvidenceSeed",
     "CreateAnalysisRequest",
@@ -42,10 +59,16 @@ __all__ = [
     "EvidenceSelector",
     "EvidenceType",
     "ExtractedBlock",
+    "ExtractedEvidenceFilter",
     "ExtractedPage",
     "ExtractedRequirementCandidate",
+    "ExtractedRuleCandidate",
+    "ExtractedRuleParameter",
+    "ExtractedRuleParameterName",
+    "ExtractedScalarType",
     "OverallRecommendation",
     "PdfExtractionResult",
+    "PdfInspectionResult",
     "Requirement",
     "RequirementExtractionBatch",
     "RequirementType",
