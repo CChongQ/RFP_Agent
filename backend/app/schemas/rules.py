@@ -9,7 +9,6 @@ from pydantic import Field, StrictInt, field_validator
 from app.schemas.base import NonEmptyString, SchemaModel
 from app.schemas.enums import EvidenceType
 
-
 type RuleFilterValue = str | int | float | bool
 
 
@@ -37,7 +36,6 @@ class EvidenceSelector(SchemaModel):
 
     evidence_type: EvidenceType
     filters: list[EvidenceFilter] = Field(default_factory=list)
-
 
 
 # ========== Supported deterministic checks ==========

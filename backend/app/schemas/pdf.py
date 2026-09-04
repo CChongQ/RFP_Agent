@@ -23,6 +23,15 @@ class ExtractedPage(SchemaModel):
     blocks: list[ExtractedBlock]
 
 
+class PdfInspectionResult(SchemaModel):
+    """Describes lightweight structural facts about one validated PDF"""
+
+    source_path: Path
+    document_sha256: Sha256
+    file_size_bytes: Annotated[int, Field(ge=1)]
+    page_count: Annotated[int, Field(ge=1)]
+
+
 class PdfExtractionResult(SchemaModel):
     """Describes the validated page-aware output from one PDF"""
 

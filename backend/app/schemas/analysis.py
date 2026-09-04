@@ -13,7 +13,25 @@ def _has_duplicates(values: list[str]) -> bool:
 
 
 class CreateAnalysisRequest(SchemaModel):
-    tender_id: Literal["TENDER-001"]  # to be changed, after MVP
+    tender_id: Literal["TENDER-001"]  # to be changed after MVP
+    confirm_large_document: bool = False
+
+
+class AnalysisPrecheckRequest(SchemaModel):
+    tender_id: Literal["TENDER-001"]
+
+
+class AnalysisPrecheck(SchemaModel):
+    """Lightweight document facts shown before analysis"""
+
+    tender_id: NonEmptyString
+    filename: NonEmptyString
+    document_sha256: Sha256
+    file_size_bytes: Annotated[int, Field(ge=1)]
+    file_size_mb: Annotated[float, Field(ge=0)]
+    page_count: Annotated[int, Field(ge=1)]
+    requires_confirmation: bool
+    warnings: list[NonEmptyString] = Field(default_factory=list)
 
 
 class ToolCallTrace(SchemaModel):
