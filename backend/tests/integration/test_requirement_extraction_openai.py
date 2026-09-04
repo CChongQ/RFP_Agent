@@ -36,7 +36,10 @@ def test_openai_extracts_requirement_with_real_source_block() -> None:
         settings.tender_manifest_path,
         settings.tender_raw_dir,
     )
+
     tender, pdf_path = catalog.get("TENDER-001")
+    print(f"Testing {pdf_path}....")
+
     extraction = extract_pdf(
         pdf_path,
         max_pdf_mb=settings.max_pdf_mb,

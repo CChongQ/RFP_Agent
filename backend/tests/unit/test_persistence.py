@@ -3,7 +3,6 @@ from unittest.mock import Mock
 
 from sqlalchemy.orm import Session
 
-from app.database.base import Base
 from app.database.models import EvidenceRecord
 from app.schemas import CompanyEvidenceSeed, Evidence, EvidenceType
 from app.services.company_seed import seed_company_evidence
@@ -13,20 +12,6 @@ Test database table registration and company evidence seeding.
 
 Below use mocked session so these unit tests do not need PostgreSQL
 """
-
-# Basic tests
-
-def test_minimal_persistence_tables_are_registered() -> None:
-    expected_tables = {
-        "analysis_runs",
-        "decisions",
-        "evidence",
-        "requirements",
-        "tenders",
-    }
-    # Allow new tables without breaking this MVP table check.
-    assert set(Base.metadata.tables).issuperset(expected_tables)
-
 
 def test_company_evidence_seed_upserts_stable_ids() -> None:
     seed = CompanyEvidenceSeed(

@@ -19,6 +19,7 @@ from app.schemas import (
     TenderDocument,
     ToolCallTrace,
 )
+from app.services.analysis_progress import ProgressReporter
 from app.services.analysis_service import AnalysisService, AnalysisServiceError
 from app.services.decision_service import DecisionServiceResult
 
@@ -85,7 +86,12 @@ def _requirement() -> Requirement:
 
 
 class FakeDecisionRunner:
-    def decide(self, requirements: Sequence[Requirement]) -> DecisionServiceResult:
+    def decide(
+        self,
+        requirements: Sequence[Requirement],
+        *,
+        progress_reporter: ProgressReporter | None = None,
+    ) -> DecisionServiceResult:
         requirement = requirements[0]
         return DecisionServiceResult(
             decisions=[
@@ -133,6 +139,7 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
         model: str,
         client: object,
         max_chunk_characters: int,
+        progress_reporter: ProgressReporter | None = None,
     ) -> list[Requirement]:
         return [requirement]
 
@@ -144,6 +151,7 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
         pdf_extractor=fake_pdf_extractor,
         requirement_extractor=fake_requirement_extractor,
         analysis_id_factory=lambda: "ANALYSIS-TEST-001",
+        progress_reporter_factory=lambda **_: Mock(spec=ProgressReporter),
         clock=iter([10.0, 10.025]).__next__,
     )
 
@@ -179,6 +187,7 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
 
 def test_analysis_service_records_hash_mismatch_failure() -> None:
     session = Mock(spec=Session)
+    reporter = Mock(spec=ProgressReporter)
 
     def wrong_hash_pdf_extractor(
         path: Path,
@@ -195,6 +204,7 @@ def test_analysis_service_records_hash_mismatch_failure() -> None:
         model="mock-model",
         pdf_extractor=wrong_hash_pdf_extractor,
         analysis_id_factory=lambda: "ANALYSIS-TEST-002",
+        progress_reporter_factory=lambda **_: reporter,
         clock=iter([20.0, 20.010]).__next__,
     )
 
@@ -204,3 +214,4 @@ def test_analysis_service_records_hash_mismatch_failure() -> None:
     analysis_record = session.add.call_args.args[0]
     assert analysis_record.status == "failed"
     assert analysis_record.trace["errors"][0].startswith("AnalysisServiceError")
+    reporter.analysis_failed.assert_called_once()

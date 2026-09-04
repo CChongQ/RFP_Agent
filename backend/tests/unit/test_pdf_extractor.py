@@ -3,7 +3,7 @@ from pathlib import Path
 import pymupdf
 import pytest
 
-from app.services.pdf_extractor import PdfExtractionError, extract_pdf
+from app.services.pdf_extractor import PdfExtractionError, extract_pdf, inspect_pdf
 
 """
 Test PDF validation, text extraction, and file metadata
@@ -80,13 +80,16 @@ def test_extract_pdf_rejects_page_limit(tmp_path: Path) -> None:
     pdf_path = tmp_path / "two-pages.pdf"
     _write_pdf(pdf_path, ["First page contains enough text", "Second page contains enough text"])
 
-    with pytest.raises(PdfExtractionError, match="exceeds the 1-page limit"):
+    with pytest.raises(PdfExtractionError, match="exceeds the 1 page limit"):
         extract_pdf(pdf_path, max_pdf_pages=1)
 
 
 def test_extract_pdf_rejects_document_without_text(tmp_path: Path) -> None:
     pdf_path = tmp_path / "empty.pdf"
     _write_pdf(pdf_path, [""])
+
+    inspection = inspect_pdf(pdf_path)
+    assert inspection.page_count == 1
 
     with pytest.raises(PdfExtractionError, match="extractable text characters"):
         extract_pdf(pdf_path)
