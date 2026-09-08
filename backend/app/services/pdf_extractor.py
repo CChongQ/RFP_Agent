@@ -11,7 +11,6 @@ from app.schemas.pdf import (
     PdfInspectionResult,
 )
 
-
 BYTES_PER_MEGABYTE = 1024 * 1024
 HASH_READ_SIZE = BYTES_PER_MEGABYTE
 
@@ -79,7 +78,7 @@ def _validate_document(document: pymupdf.Document, *, max_pdf_pages: int) -> int
     if document.needs_pass:
         raise PdfExtractionError("password-protected PDFs are not supported")
 
-    page_count = document.page_count
+    page_count = int(document.page_count)
     if page_count < 1:
         raise PdfExtractionError("PDF contains no pages")
     if page_count > max_pdf_pages:

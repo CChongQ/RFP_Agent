@@ -233,7 +233,7 @@ def test_analysis_service_builds_trace_and_flushes_records(
 
 # Corner-case tests
 
-def test_analysis_result_explains_missing_mandatory_requirements() -> None:
+def test_analysis_result_explains_missing_mandatory_requirements(tmp_path: Path) -> None:
     
     requirement = _requirement().model_copy(
         update={"requirement_type": RequirementType.INFORMATIONAL}
@@ -266,6 +266,10 @@ def test_analysis_result_explains_missing_mandatory_requirements() -> None:
         "no mandatory requirements" in reason.casefold()
         for reason in result.human_review_reasons
     )
+    exported_path = export_analysis_result(result, tmp_path)
+    exported = json.loads(exported_path.read_text(encoding="utf-8"))
+    assert exported["human_review_reasons"] == result.human_review_reasons
+    assert exported["risks"] == result.risks
 
 
 def test_analysis_service_records_hash_mismatch_failure() -> None:

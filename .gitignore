@@ -1,0 +1,32 @@
+# Python environments and caches
+.venv/
+.conda/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local configuration and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Runtime and generated outputs
+*.log
+logs/
+/tmp/
+/.codex-pytest-*/
+/.codex_pytest_*/
+artifacts/
+*.egg-info/
+build/
+dist/
+
+/data/

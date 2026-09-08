@@ -1,8 +1,8 @@
 import csv
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import HttpUrl, ValidationError
 
 from app.schemas import TenderDocument
 
@@ -27,7 +27,7 @@ class TenderSourceMissingError(FileNotFoundError):
     """when a manifest tender does not resolve to a local PDF"""
 
 
-def _field(row: Mapping[object, object], name: str) -> str:
+def _field(row: Mapping[str, object], name: str) -> str:
     # Fail early when a required CSV value is blank or not text
     value = row.get(name)
     if not isinstance(value, str) or not value.strip():
@@ -78,7 +78,7 @@ class TenderCatalog:
             raise TenderCatalogError("tender manifest could not be read") from exc
 
     @staticmethod
-    def _validate_columns(fieldnames: list[str] | None) -> None:
+    def _validate_columns(fieldnames: Sequence[str] | None) -> None:
         missing_columns = REQUIRED_COLUMNS - set(fieldnames or [])
         if missing_columns:
             missing = ", ".join(sorted(missing_columns))
@@ -104,12 +104,12 @@ class TenderCatalog:
         return matching_rows[0]
 
     @staticmethod
-    def _build_tender(row: Mapping[object, object]) -> TenderDocument:
+    def _build_tender(row: Mapping[str, object]) -> TenderDocument:
         try:
             return TenderDocument(
                 tender_id=_field(row, "tender_id"),
                 title=_field(row, "title"),
-                source_url=_field(row, "notice_url"),
+                source_url=HttpUrl(_field(row, "notice_url")),
                 file_hash=_field(row, "sha256"),
                 local_filename=_field(row, "local_filename"),
             )

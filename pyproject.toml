@@ -24,15 +24,6 @@ dependencies = [
 api = [
     "fastapi>=0.141,<1",
     "uvicorn>=0.52,<1",
-    "python-multipart>=0.0.32,<1",
-]
-
-eval = [
-    "pandas>=3.0,<4",
-]
-
-ui = [
-    "streamlit>=1.62,<2",
 ]
 
 dev = [
@@ -42,6 +33,7 @@ dev = [
     "httpx>=0.28,<1",
     "ruff>=0.16,<1",
     "mypy>=2.3,<3",
+    "types-PyYAML>=6.0.12.20260906,<7",
     "pip-audit>=2.10,<3",
 ]
 
@@ -58,7 +50,7 @@ include = ["app*"]
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 asyncio_mode = "auto"
-addopts = "-ra"
+addopts = "-ra --strict-markers"
 markers = [
     "external: tests that call external APIs and may incur cost",
     "integration: tests requiring PostgreSQL or other services",

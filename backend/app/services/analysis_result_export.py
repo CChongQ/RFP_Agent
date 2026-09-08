@@ -3,7 +3,9 @@ from pathlib import Path
 
 from app.schemas import AnalysisResult
 
-"""For dev evalaution only. Generate a compact, human-readable JSON result for inspection, debugging, and evaluation comparison. 
+"""
+For dev evalaution only. Generate a compact, human-readable JSON result for:
+    inspection, debugging, and evaluation comparison. 
 """
 EXPORT_SCHEMA_VERSION = "1.1"
 
@@ -67,6 +69,8 @@ def _comparison_payload(result: AnalysisResult) -> dict[str, object]:
         "model_version": result.trace.model_version,
         "prompt_version": result.trace.prompt_version,
         "overall_recommendation": result.overall_recommendation.value,
+        "risks": result.risks,
+        "human_review_reasons": result.human_review_reasons,
         "run_metrics": {
             "latency_ms": result.trace.latency_ms,
             "latency_scope": result.trace.latency_scope,

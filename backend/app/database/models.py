@@ -37,7 +37,11 @@ ANALYSIS_RUN_STATUSES = (
 )
 
 """
-Defines PostgreSQL database models for storing tenders, extracted requirements, company evidence, analysis runs, and decisions
+Defines PostgreSQL database models for 
+- storing tenders, extracted requirements
+- company evidence
+- analysis runs
+- decisions
 """
 
 def _sql_string_list(values: Sequence[str]) -> str:

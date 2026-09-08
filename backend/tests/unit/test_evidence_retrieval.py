@@ -59,7 +59,7 @@ def test_embed_missing_evidence_caches_vectors() -> None:
 
 
 def test_embed_missing_evidence_supports_structured_data() -> None:
-    # test evidence can be embedded even when it has no normal supporting_text and has only structured JSON data
+    # evidence can be embedded even when has no normal supporting_text and has only structured data
     record = _record(evidence_id="CERTIFICATION-TEST-001")
     record.supporting_text = None
     record.structured_value = {"certification": "SOC 2"}
