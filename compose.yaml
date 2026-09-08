@@ -1,0 +1,36 @@
+name: rfp-agent
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: rfp-agent-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-rfp_agent}
+      POSTGRES_USER: ${DATABASE_USER:-rfp_agent}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+
+    ports:
+      # Bind locally
+      - "127.0.0.1:${DATABASE_PORT:-5432}:5432"
+
+    volumes:
+      # Preserve local development data across container restarts
+      - rfp_postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      # Let scripts wait for PostgreSQL readiness instead of guessing with sleeps
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  rfp_postgres_data:
+    name: rfp-agent-postgres-data

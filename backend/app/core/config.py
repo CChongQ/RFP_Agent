@@ -18,14 +18,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = DEFAULT_APP_NAME
-    app_env: str = "development"
-    log_level: str = "INFO"
     analysis_progress_log_path: Path = Path("./logs/analysis_progress.jsonl")
     analysis_run_output_dir: Path = Path("./data/evaluation/runs")
 
-    api_host: str = "127.0.0.1"
-    api_port: int = Field(default=8000, ge=1, le=65_535)
 
     # Require an explicit database target so data is never written accidentally
     database_url: str
@@ -44,10 +39,8 @@ class Settings(BaseSettings):
         default=None, ge=0, allow_inf_nan=False
     )
 
-    data_root: Path = Path("./data")
     tender_manifest_path: Path = Path("./data/tenders/manifest.csv")
     tender_raw_dir: Path = Path("./data/tenders/raw")
-    tender_derived_dir: Path = Path("./data/tenders/derived")
 
     max_pdf_mb: int = Field(default=25, ge=1)
     max_pdf_pages: int = Field(default=250, ge=1)
