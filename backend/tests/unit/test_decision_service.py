@@ -18,6 +18,7 @@ from app.schemas import (
     SourceReference,
 )
 from app.services.decision_service import DecisionService, OpenAIEvidenceAssessmentClient
+from app.services.model_usage import ModelUsageTracker
 
 """
 Test how evidence and rules become bid decisions
@@ -276,8 +277,10 @@ def test_decision_service_uses_human_review_after_invalid_retry() -> None:
     assert assessor.rejected_evidence_ids == [[], ["requirement_id"]]
 
 
-def test_openai_assessment_input_lists_allowed_and_rejected_ids() -> None:
+@pytest.mark.parametrize("reports_usage", [True, False])
+def test_openai_assessment_input_and_reported_usage(reports_usage: bool) -> None:
     evidence = _evidence()
+    tracker = ModelUsageTracker()
     openai_client = Mock()
     openai_client.responses.parse.return_value = Mock(
         output_parsed=EvidenceAssessment(
@@ -285,9 +288,9 @@ def test_openai_assessment_input_lists_allowed_and_rejected_ids() -> None:
             evidence_ids=[evidence.evidence_id],
             reason="The stored project supports the requirement",
         ),
-        usage=None,
+        usage=Mock(input_tokens=100, output_tokens=40) if reports_usage else None,
     )
-    client = OpenAIEvidenceAssessmentClient(openai_client)
+    client = OpenAIEvidenceAssessmentClient(openai_client, tracker)
 
     client.assess(
         model="mock-model",
@@ -303,6 +306,10 @@ def test_openai_assessment_input_lists_allowed_and_rejected_ids() -> None:
     assert input_payload["validation_feedback"]["rejected_evidence_ids"] == [
         "requirement_id"
     ]
+    usage = tracker.snapshot()
+    assert usage.input_tokens == (100 if reports_usage else 0)
+    assert usage.output_tokens == (40 if reports_usage else 0)
+    assert usage.unreported_calls == (0 if reports_usage else 1)
 
 
 def test_automatic_rule_failure_requires_human_review() -> None:

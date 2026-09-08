@@ -5,7 +5,7 @@ from app.schemas import AnalysisResult
 
 """For dev evalaution only. Generate a compact, human-readable JSON result for inspection, debugging, and evaluation comparison. 
 """
-EXPORT_SCHEMA_VERSION = "1.0"
+EXPORT_SCHEMA_VERSION = "1.1"
 
 
 class AnalysisResultExportError(RuntimeError):
@@ -69,8 +69,11 @@ def _comparison_payload(result: AnalysisResult) -> dict[str, object]:
         "overall_recommendation": result.overall_recommendation.value,
         "run_metrics": {
             "latency_ms": result.trace.latency_ms,
+            "latency_scope": result.trace.latency_scope,
             "input_tokens": result.trace.input_tokens,
             "output_tokens": result.trace.output_tokens,
+            "usage_scope": result.trace.usage_scope,
+            "usage_complete": result.trace.usage_complete,
             "estimated_cost_usd": result.trace.estimated_cost_usd,
         },
         "results": comparison_items,

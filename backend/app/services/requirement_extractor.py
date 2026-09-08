@@ -97,11 +97,14 @@ class OpenAIRequirementModelClient:
         )
 
         # record usage
-        if self._usage_tracker is not None and response.usage is not None:
-            self._usage_tracker.add(
-                input_tokens=response.usage.input_tokens,
-                output_tokens=response.usage.output_tokens,
-            )
+        if self._usage_tracker is not None:
+            if response.usage is None:
+                self._usage_tracker.record_missing_usage()
+            else:
+                self._usage_tracker.add(
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                )
         
         # when model returns no parsed result    
         if response.output_parsed is None:

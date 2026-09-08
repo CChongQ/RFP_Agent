@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     openai_embedding_model: str | None = None
     openai_max_retries: int = Field(default=2, ge=0)
     openai_timeout_seconds: float = Field(default=60, gt=0)
+    
+    # Optional, blank prices leave estimated cost as unknown
+    openai_input_cost_per_mil_tokens: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False
+    )
+    openai_output_cost_per_mil_tokens: float | None = Field(
+        default=None, ge=0, allow_inf_nan=False
+    )
 
     data_root: Path = Path("./data")
     tender_manifest_path: Path = Path("./data/tenders/manifest.csv")
@@ -52,7 +60,6 @@ class Settings(BaseSettings):
 
     # Require an explicit opt-in before tests can make paid external calls
     enable_external_api_calls: bool = False
-    max_analysis_cost_usd: float = Field(default=1.0, ge=0)
 
 
 @lru_cache

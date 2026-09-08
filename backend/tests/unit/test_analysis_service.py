@@ -1,3 +1,4 @@
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import Mock
@@ -20,8 +21,10 @@ from app.schemas import (
     ToolCallTrace,
 )
 from app.services.analysis_progress import ProgressReporter
+from app.services.analysis_result_export import export_analysis_result
 from app.services.analysis_service import AnalysisService, AnalysisServiceError
 from app.services.decision_service import DecisionServiceResult
+from app.services.model_usage import ModelUsageTracker
 
 """
 Test the service that runs and saves the full analysis flow.
@@ -117,12 +120,30 @@ class FakeDecisionRunner:
 
 # Basic tests
 
-def test_analysis_service_builds_trace_and_flushes_records() -> None:
+@pytest.mark.parametrize(
+    "input_price,output_price,missing_usage,expected_cost",
+    [
+        (None, None, False, None),
+        (2.0, 8.0, False, 0.00052),
+        (2.0, 8.0, True, None),
+    ],
+)
+def test_analysis_service_builds_trace_and_flushes_records(
+    tmp_path: Path,
+    input_price: float | None,
+    output_price: float | None,
+    missing_usage: bool,
+    expected_cost: float | None,
+) -> None:
     # verifies orchestration and persistence logic, with all syntetic data 
     
     session = Mock(spec=Session)
     requirement = _requirement()
     pdf_path = Path("synthetic.pdf")
+    usage_tracker = ModelUsageTracker(
+        input_cost_per_mil_tokens=input_price,
+        output_cost_per_mil_tokens=output_price,
+    )
 
     def fake_pdf_extractor(
         path: Path,
@@ -141,6 +162,9 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
         max_chunk_characters: int,
         progress_reporter: ProgressReporter | None = None,
     ) -> list[Requirement]:
+        usage_tracker.add(input_tokens=100, output_tokens=40)
+        if missing_usage:
+            usage_tracker.record_missing_usage()
         return [requirement]
 
     service = AnalysisService(
@@ -148,6 +172,7 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
         Mock(),
         FakeDecisionRunner(),
         model="mock-model",
+        usage_tracker=usage_tracker,
         pdf_extractor=fake_pdf_extractor,
         requirement_extractor=fake_requirement_extractor,
         analysis_id_factory=lambda: "ANALYSIS-TEST-001",
@@ -165,6 +190,15 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
     }
     assert result.trace.tool_calls[0].result_ids == ["PROJECT-TEST-001"]
     assert result.trace.latency_ms == 25
+    assert result.trace.latency_scope == "analysis_stage"
+    assert result.trace.usage_scope == "extraction_n_assess_only"
+    assert result.trace.usage_complete is (not missing_usage)
+    assert result.trace.input_tokens == 100
+    assert result.trace.output_tokens == 40
+    if expected_cost is None:
+        assert result.trace.estimated_cost_usd is None
+    else:
+        assert result.trace.estimated_cost_usd == pytest.approx(expected_cost)
     assert any(
         isinstance(call.args[0], RequirementRecord)
         for call in session.merge.call_args_list
@@ -181,6 +215,20 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
     analysis_record = session.add.call_args.args[0]
     assert isinstance(analysis_record, AnalysisRunRecord)
     assert analysis_record.status == "completed"
+    assert analysis_record.trace == result.trace.model_dump(mode="json")
+
+    exported_path = export_analysis_result(result, tmp_path)
+    exported = json.loads(exported_path.read_text(encoding="utf-8"))
+    assert exported["schema_version"] == "1.1"
+    assert exported["run_metrics"] == {
+        "latency_ms": 25,
+        "latency_scope": "analysis_stage",
+        "input_tokens": 100,
+        "output_tokens": 40,
+        "usage_scope": "extraction_n_assess_only",
+        "usage_complete": not missing_usage,
+        "estimated_cost_usd": result.trace.estimated_cost_usd,
+    }
 
 
 # Corner-case tests

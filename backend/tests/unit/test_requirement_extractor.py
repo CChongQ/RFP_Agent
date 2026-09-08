@@ -1,5 +1,7 @@
 """Test turning model-selected PDF blocks into traceable requirements."""
 
+from unittest.mock import Mock
+
 import pytest
 
 from app.schemas import (
@@ -16,7 +18,9 @@ from app.schemas import (
     RequirementType,
     RuleOperator,
 )
+from app.services.model_usage import ModelUsageTracker
 from app.services.requirement_extractor import (
+    OpenAIRequirementModelClient,
     RequirementExtractionError,
     extract_requirements,
 )
@@ -110,6 +114,27 @@ def _rule_candidate(
             ExtractedRuleParameter(name=name, values=values) for name, values in parameters
         ],
     )
+
+
+@pytest.mark.parametrize("reports_usage", [True, False])
+def test_requirement_client_records_available_response_usage(reports_usage: bool) -> None:
+    tracker = ModelUsageTracker()
+    batch = RequirementExtractionBatch(requirements=[])
+    client = Mock()
+    client.responses.parse.return_value = Mock(
+        output_parsed=batch,
+        usage=Mock(input_tokens=100, output_tokens=40) if reports_usage else None,
+    )
+
+    result = OpenAIRequirementModelClient(client, tracker).parse_requirements(
+        model="mock-model", instructions="Extract requirements", input_text="Tender text"
+    )
+
+    assert result == batch
+    usage = tracker.snapshot()
+    assert usage.input_tokens == (100 if reports_usage else 0)
+    assert usage.output_tokens == (40 if reports_usage else 0)
+    assert usage.unreported_calls == (0 if reports_usage else 1)
 
 
 def test_extract_requirements_resolves_exact_source_block() -> None:

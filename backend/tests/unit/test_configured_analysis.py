@@ -8,13 +8,14 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.services import configured_analysis
 from app.services.configured_analysis import ConfiguredAnalysisRunner
+from app.services.model_usage import ModelUsageSnapshot
 from app.services.rule_evaluator import DeterministicRuleEvaluator
 
 
-def test_configured_runner_includes_deterministic_rule_evaluator(
+def test_configured_runner_wires_rule_evaluator_and_cost_rates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Confirm the real runner passes the generic evaluator to DecisionService."""
+    """Confirm configured rules and prices reach the analysis services."""
 
     session = Mock(spec=Session)
     settings = Settings(
@@ -24,8 +25,12 @@ def test_configured_runner_includes_deterministic_rule_evaluator(
         openai_model="mock-model",
         openai_embedding_model="mock-embedding-model",
         enable_external_api_calls=True,
+        openai_input_cost_per_mil_tokens=2.0,
+        openai_output_cost_per_mil_tokens=8.0,
     )
     decision_service_factory = Mock()
+    analysis_service_factory = Mock()
+    monkeypatch.setattr(configured_analysis, "AnalysisService", analysis_service_factory)
     monkeypatch.setattr(configured_analysis, "OpenAI", Mock(return_value=Mock()))
     monkeypatch.setattr(
         configured_analysis,
@@ -37,3 +42,7 @@ def test_configured_runner_includes_deterministic_rule_evaluator(
 
     evaluator = decision_service_factory.call_args.kwargs["rule_evaluator"]
     assert isinstance(evaluator, DeterministicRuleEvaluator)
+    tracker = analysis_service_factory.call_args.kwargs["usage_tracker"]
+    assert tracker.estimate_cost(
+        ModelUsageSnapshot(input_tokens=1000, output_tokens=100)
+    ) == pytest.approx(0.0028)

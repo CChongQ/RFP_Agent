@@ -179,7 +179,10 @@ class ConfiguredAnalysisRunner:
         model_config = self._read_model_configuration()
         
         # Share usage counts across extraction and decision calls
-        usage_tracker = ModelUsageTracker()
+        usage_tracker = ModelUsageTracker(
+            input_cost_per_mil_tokens=settings.openai_input_cost_per_mil_tokens,
+            output_cost_per_mil_tokens=settings.openai_output_cost_per_mil_tokens,
+        )
         
         #note: use 1 client so timeout and retry rules stay the same
         client = OpenAI(

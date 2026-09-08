@@ -52,11 +52,16 @@ class TraceMetadata(SchemaModel):
     model_version: NonEmptyString
     prompt_version: NonEmptyString
     
+    # dnd at trace construction, before final persistence, commit and export
     latency_ms: Annotated[int, Field(ge=0)]
+    latency_scope: Literal["analysis_stage"] = "analysis_stage"
     
     input_tokens: Annotated[int, Field(ge=0)] = 0
     output_tokens: Annotated[int, Field(ge=0)] = 0
-    estimated_cost_usd: Annotated[float, Field(ge=0)] = 0.0
+    usage_scope: Literal["extraction_n_assess_only"] = "extraction_n_assess_only"
+    # False if any returned extraction/assessment response omitted usage.
+    usage_complete: bool = True
+    estimated_cost_usd: Annotated[float, Field(ge=0)] | None = None
     
     extracted_requirement_ids: list[NonEmptyString] = Field(default_factory=list)
     requirement_source_block_ids: dict[str, list[NonEmptyString]] = Field(
