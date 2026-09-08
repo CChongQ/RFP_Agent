@@ -28,7 +28,7 @@ Note:
 
 
 class DeterministicRuleEvaluator:
-    """ Compares that evidence against the rule, and provide a deterministic result(pass, fail, or human review) """
+    """ Compares that evidence against the rule, and provide a deterministic result """
     
     def __init__(self, evidence_service: RuleEvidenceService, *, as_of: date) -> None:
         self._evidence_service = evidence_service
