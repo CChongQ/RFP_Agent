@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import pytest
+
 from app.schemas import Requirement, RequirementType, RuleOutcome, RuleSpec, SourceReference
 from app.services.rule_evaluator import DeterministicRuleEvaluator
 from app.services.rule_evidence import RuleEvidenceService, RuleEvidenceValue
@@ -144,6 +146,41 @@ def test_evaluate_certification_uses_status_and_expiry() -> None:
 
     assert result is not None
     assert result.outcome is RuleOutcome.PASSED
+
+
+@pytest.mark.parametrize("operator", ["valid_until", "certification_validity"])
+@pytest.mark.parametrize(
+    "valid_from,expected_outcome",
+    [
+        (None, RuleOutcome.PASSED),
+        (date(2025, 12, 31), RuleOutcome.PASSED),
+        (date(2026, 1, 1), RuleOutcome.PASSED),
+        (date(2026, 1, 2), RuleOutcome.FAILED),
+    ],
+)
+def test_validity_rules_check_start_date(
+    operator: str,
+    valid_from: date | None,
+    expected_outcome: RuleOutcome,
+) -> None:
+    rule = _rule({"operator": operator}, evidence_type="certification")
+    evaluator = DeterministicRuleEvaluator(
+        FakeRuleEvidenceService(
+            RuleEvidenceValue(
+                status="valid",
+                valid_from=valid_from,
+                valid_until=date(2027, 1, 1),
+            )
+        ),
+        as_of=date(2026, 1, 1),
+    )
+
+    result = evaluator.evaluate(_requirement(rule))
+
+    assert result is not None
+    assert result.outcome is expected_outcome
+    if expected_outcome is RuleOutcome.FAILED:
+        assert "not valid until 2026-01-02" in result.reason
 
 
 def test_evaluate_multiple_rules_returns_first_failure() -> None:

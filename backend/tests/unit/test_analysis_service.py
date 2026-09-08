@@ -185,6 +185,41 @@ def test_analysis_service_builds_trace_and_flushes_records() -> None:
 
 # Corner-case tests
 
+def test_analysis_result_explains_missing_mandatory_requirements() -> None:
+    
+    requirement = _requirement().model_copy(
+        update={"requirement_type": RequirementType.INFORMATIONAL}
+    )
+    
+    decision_result = FakeDecisionRunner().decide([requirement])
+    
+    runner = Mock()
+    runner.decide.return_value = DecisionServiceResult(
+        decisions=decision_result.decisions,
+        overall_recommendation=OverallRecommendation.HUMAN_REVIEW,
+        tool_calls=decision_result.tool_calls,
+    )
+    
+    pdf_path = Path("synthetic.pdf")
+    service = AnalysisService(
+        Mock(spec=Session),
+        Mock(),
+        runner,
+        model="mock-model",
+        pdf_extractor=Mock(return_value=_pdf_result(pdf_path)),
+        requirement_extractor=Mock(return_value=[requirement]),
+        progress_reporter_factory=lambda **_: Mock(spec=ProgressReporter),
+    )
+
+    result = service.analyze(_tender(), pdf_path)
+
+    assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+    assert any(
+        "no mandatory requirements" in reason.casefold()
+        for reason in result.human_review_reasons
+    )
+
+
 def test_analysis_service_records_hash_mismatch_failure() -> None:
     session = Mock(spec=Session)
     reporter = Mock(spec=ProgressReporter)

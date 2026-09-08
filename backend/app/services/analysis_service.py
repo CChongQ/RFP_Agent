@@ -23,6 +23,7 @@ from app.schemas import (
     ExtractedPage,
     PdfExtractionResult,
     Requirement,
+    RequirementType,
     TenderDocument,
     ToolCallTrace,
     TraceMetadata,
@@ -294,7 +295,7 @@ class AnalysisService:
             decisions=decision_result.decisions,
             overall_recommendation=decision_result.overall_recommendation,
             risks=_risk_reasons(decision_result),
-            human_review_reasons=_human_review_reasons(decision_result),
+            human_review_reasons=_human_review_reasons(decision_result, requirements),
             trace=self._build_trace(document_sha256, progress),
         )
 
@@ -414,10 +415,13 @@ def _risk_reasons(result: DecisionServiceResult) -> list[str]:
     ]
 
 
-def _human_review_reasons(result: DecisionServiceResult) -> list[str]:
-    """Collect reasons from decisions that need human review"""
+def _human_review_reasons(
+    result: DecisionServiceResult,
+    requirements: Sequence[Requirement],
+) -> list[str]:
+    """Explain review needs from the extraction and individual decisions."""
 
-    return [
+    reasons = [
         decision.reason
         for decision in result.decisions
         if decision.status
@@ -426,3 +430,11 @@ def _human_review_reasons(result: DecisionServiceResult) -> list[str]:
             DecisionStatus.REQUIRES_HUMAN_REVIEW,
         }
     ]
+    if not any(
+        requirement.requirement_type is RequirementType.MANDATORY
+        for requirement in requirements
+    ):
+        reasons.append(
+            "No mandatory requirements were extracted; Need human review."
+        )
+    return reasons

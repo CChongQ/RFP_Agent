@@ -485,6 +485,12 @@ def _apply_status_policy(
             DecisionStatus.INSUFFICIENT_EVIDENCE,
             "A satisfied decision requires selected stored evidence",
         )
+
+    if assessment.status is DecisionStatus.NOT_SATISFIED and not selected_ids:
+        return (
+            DecisionStatus.INSUFFICIENT_EVIDENCE,
+            "A not-satisfied decision requires selected stored evidence",
+        )
         
     return assessment.status, assessment.reason
 
@@ -532,6 +538,9 @@ def _recommend(
         for requirement in requirements
         if requirement.requirement_type is RequirementType.MANDATORY
     }
+    if not mandatory_requirement_ids:
+        return OverallRecommendation.HUMAN_REVIEW
+
     mandatory_decisions = [
         decision
         for decision in decisions

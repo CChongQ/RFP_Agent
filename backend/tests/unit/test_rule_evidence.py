@@ -116,23 +116,24 @@ def test_read_returns_missing_value_without_guessing() -> None:
     assert result.problem is None
 
 
-def test_read_returns_one_validity_date() -> None:
+def test_read_returns_one_validity_window() -> None:
     values = Mock()
-    values.all.return_value = [date(2030, 1, 1)]
+    values.all.return_value = [(date(2025, 1, 1), date(2030, 1, 1))]
     session = Mock(spec=Session)
-    session.scalars.return_value = values
+    session.execute.return_value = values
     service = RuleEvidenceService(session)
     rule = _rule(check={"operator": "valid_until"})
 
     result = service.read(rule)
 
+    assert result.valid_from == date(2025, 1, 1)
     assert result.valid_until == date(2030, 1, 1)
     assert result.problem is None
 
 
 def test_read_returns_one_certification_state() -> None:
     rows = Mock()
-    rows.all.return_value = [("valid", date(2030, 1, 1))]
+    rows.all.return_value = [("valid", date(2025, 1, 1), date(2030, 1, 1))]
     session = Mock(spec=Session)
     session.execute.return_value = rows
     service = RuleEvidenceService(session)
@@ -145,6 +146,7 @@ def test_read_returns_one_certification_state() -> None:
     result = service.read(rule)
 
     assert result.status == "valid"
+    assert result.valid_from == date(2025, 1, 1)
     assert result.valid_until == date(2030, 1, 1)
     assert result.problem is None
 

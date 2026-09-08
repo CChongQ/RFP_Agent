@@ -9,11 +9,11 @@ from app.services.requirement_extractor import (
 )
 from app.services.tender_catalog import TenderCatalog
 
-"""Test one real grounded requirement-extraction call against TENDER-001 page 1."""
+"""Test one real grounded requirement-extraction call against TENDER-001."""
 
 
-EXPECTED_BLOCK_ID = "P001-B008"
-EXPECTED_TEXT_FRAGMENT = "13MB to avoid"
+SOURCE_PAGE_NUMBER = 18
+EXPECTED_TEXT_FRAGMENT = "must provide the GC the ability to isolate"
 
 
 @pytest.mark.external
@@ -45,13 +45,17 @@ def test_openai_extracts_requirement_with_real_source_block() -> None:
         max_pdf_mb=settings.max_pdf_mb,
         max_pdf_pages=settings.max_pdf_pages,
     )
-    page = extraction.pages[0]
+    
+    page = extraction.pages[SOURCE_PAGE_NUMBER - 1]
+    
     blocks_by_id = {block.block_id: block for block in page.blocks}
 
     # Check the local fixture before making the paid model request.
-    expected_block = blocks_by_id.get(EXPECTED_BLOCK_ID)
-    assert expected_block is not None
-    assert EXPECTED_TEXT_FRAGMENT in expected_block.text
+    matching_blocks = [
+        block for block in page.blocks if EXPECTED_TEXT_FRAGMENT in block.text
+    ]
+    assert len(matching_blocks) == 1
+    expected_block_id = matching_blocks[0].block_id
 
     openai_client = OpenAI(
         api_key=api_key,
@@ -72,7 +76,7 @@ def test_openai_extracts_requirement_with_real_source_block() -> None:
         for requirement in requirements
         for reference in requirement.source_references
     }
-    assert EXPECTED_BLOCK_ID in referenced_block_ids
+    assert expected_block_id in referenced_block_ids
 
     for requirement in requirements:
         reference_ids = [item.block_id for item in requirement.source_references]

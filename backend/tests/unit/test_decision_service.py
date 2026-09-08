@@ -2,6 +2,8 @@ import json
 from collections.abc import Sequence
 from unittest.mock import Mock
 
+import pytest
+
 from app.schemas import (
     DecisionStatus,
     DeterministicRuleResult,
@@ -133,6 +135,71 @@ def test_decision_service_returns_bid_for_supported_mandatory_requirement() -> N
 
 
 # Corner-case tests
+@pytest.mark.parametrize(
+    "requirement_type",
+    [RequirementType.SCORED, RequirementType.OPTIONAL, RequirementType.INFORMATIONAL],
+)
+def test_decision_service_requires_review_without_mandatory_requirements(
+    requirement_type: RequirementType,
+) -> None:
+    
+    evidence = _evidence()
+    
+    requirement = _requirement().model_copy(
+        update={"requirement_type": requirement_type}
+    )
+    
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        FakeAssessmentClient(
+            EvidenceAssessment(
+                status=DecisionStatus.SATISFIED,
+                evidence_ids=[evidence.evidence_id],
+                reason="The stored project supports the requirement",
+            )
+        ),
+        model="mock-model",
+    )
+
+    result = service.decide([requirement])
+
+    assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+
+
+@pytest.mark.parametrize("has_selected_evidence", [False, True])
+def test_mandatory_rejection_requires_selected_evidence(
+    has_selected_evidence: bool,
+) -> None:
+    
+    evidence = _evidence().model_copy(
+        update={"supporting_text": "The company has no implementation experience"}
+    )
+    
+    selected_ids = [evidence.evidence_id] if has_selected_evidence else []
+    
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        FakeAssessmentClient(
+            EvidenceAssessment(
+                status=DecisionStatus.NOT_SATISFIED,
+                evidence_ids=selected_ids,
+                reason="The company lacks the required implementation experience",
+            )
+        ),
+        model="mock-model",
+    )
+
+    result = service.decide([_requirement()])
+
+    assert result.decisions[0].evidence_ids == selected_ids
+    if has_selected_evidence:
+        assert result.decisions[0].status is DecisionStatus.NOT_SATISFIED
+        assert result.overall_recommendation is OverallRecommendation.NO_BID
+    else:
+        assert result.decisions[0].status is DecisionStatus.INSUFFICIENT_EVIDENCE
+        assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+
+
 def test_decision_service_rejects_unsupported_satisfaction() -> None:
     evidence = _evidence()
     service = DecisionService(
@@ -154,7 +221,7 @@ def test_decision_service_rejects_unsupported_satisfaction() -> None:
 
 
 def test_decision_service_retries_invalid_evidence_id_once() -> None:
-    evidence = _evidence()
+    evidence = _evidence() 
     assessor = FakeAssessmentClient(
         EvidenceAssessment(
             status=DecisionStatus.SATISFIED,
