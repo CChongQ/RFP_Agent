@@ -25,7 +25,13 @@ def _to_evidence_record(evidence: Evidence) -> EvidenceRecord:
 
 def _update_evidence_record(record: EvidenceRecord, evidence: Evidence) -> None:
     
-    text_changed = record.supporting_text != evidence.supporting_text
+    searchable_content_changed = (
+        record.supporting_text != evidence.supporting_text
+        or (
+            evidence.supporting_text is None
+            and record.structured_value != evidence.structured_value
+        )
+    )
     
     record.evidence_type = evidence.evidence_type.value
     record.supporting_text = evidence.supporting_text
@@ -33,8 +39,8 @@ def _update_evidence_record(record: EvidenceRecord, evidence: Evidence) -> None:
     record.valid_from = evidence.valid_from
     record.valid_until = evidence.valid_until
     
-    if text_changed:
-        # old vector no longer match the updated narrative text
+    if searchable_content_changed:
+        # Search embeds narrative text, or structured content when text is absent
         record.embedding = None
 
 

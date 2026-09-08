@@ -92,8 +92,9 @@ def validate_valid_until(
     *,
     as_of: date,
     subject: str = "evidence",
+    valid_from: date | None = None,
 ) -> DeterministicRuleResult:
-    """Check evidence remains valid on an inclusive reference date"""
+    """Check evidence validity window on an inclusive reference date"""
 
     subject = _required_text(subject, name="subject")
 
@@ -102,6 +103,13 @@ def validate_valid_until(
             rule_type=RULE_VALID_UNTIL,
             outcome=RuleOutcome.REQUIRES_HUMAN_REVIEW,
             reason=f"{subject} expiry date is missing",
+        )
+
+    if valid_from is not None and valid_from > as_of:
+        return DeterministicRuleResult(
+            rule_type=RULE_VALID_UNTIL,
+            outcome=RuleOutcome.FAILED,
+            reason=f"{subject} is not valid until {valid_from.isoformat()}",
         )
 
     if valid_until >= as_of:
@@ -169,8 +177,9 @@ def validate_certification(
     *,
     as_of: date,
     subject: str = "certification",
+    valid_from: date | None = None,
 ) -> DeterministicRuleResult:
-    """Check a certification has valid status and has not expired"""
+    """Check certification status and its inclusive validity window"""
 
     subject = _required_text(subject, name="subject")
 
@@ -188,6 +197,13 @@ def validate_certification(
             rule_type=RULE_CERTIFICATION_VALIDITY,
             outcome=RuleOutcome.FAILED,
             reason=f"{subject} status is {status_value}",
+        )
+
+    if valid_from is not None and valid_from > as_of:
+        return DeterministicRuleResult(
+            rule_type=RULE_CERTIFICATION_VALIDITY,
+            outcome=RuleOutcome.FAILED,
+            reason=f"{subject} is not valid until {valid_from.isoformat()}",
         )
 
     if valid_until < as_of:

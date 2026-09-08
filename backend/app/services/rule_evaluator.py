@@ -62,6 +62,7 @@ class DeterministicRuleEvaluator:
                 evidence.valid_until,
                 as_of=self._as_of,
                 subject=rule.subject,
+                valid_from=evidence.valid_from,
             )
         if isinstance(check, CertificationValidityCheck):
             return validate_certification(
@@ -69,6 +70,7 @@ class DeterministicRuleEvaluator:
                 evidence.valid_until,
                 as_of=self._as_of,
                 subject=rule.subject,
+                valid_from=evidence.valid_from,
             )
         raise TypeError(f"unsupported rule check: {type(check).__name__}")
 

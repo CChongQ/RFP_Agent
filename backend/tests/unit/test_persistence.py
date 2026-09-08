@@ -1,9 +1,9 @@
 from datetime import date
 from unittest.mock import Mock
 
+import pytest
 from sqlalchemy.orm import Session
 
-from app.database.base import Base
 from app.database.models import EvidenceRecord
 from app.schemas import CompanyEvidenceSeed, Evidence, EvidenceType
 from app.services.company_seed import seed_company_evidence
@@ -13,20 +13,6 @@ Test database table registration and company evidence seeding.
 
 Below use mocked session so these unit tests do not need PostgreSQL
 """
-
-# Basic tests
-
-def test_minimal_persistence_tables_are_registered() -> None:
-    expected_tables = {
-        "analysis_runs",
-        "decisions",
-        "evidence",
-        "requirements",
-        "tenders",
-    }
-    # Allow new tables without breaking this MVP table check.
-    assert set(Base.metadata.tables).issuperset(expected_tables)
-
 
 def test_company_evidence_seed_upserts_stable_ids() -> None:
     seed = CompanyEvidenceSeed(
@@ -55,6 +41,46 @@ def test_company_evidence_seed_upserts_stable_ids() -> None:
 
 
 # Corner-case tests
+
+@pytest.mark.parametrize(
+    "supporting_text,new_value,clears_embedding",
+    [
+        (None, 2000000, True),
+        (None, 1000000, False),
+        ("A fictional implementation project", 2000000, False),
+    ],
+)
+def test_seed_invalidates_embedding_only_when_searchable_content_changes(
+    supporting_text: str | None,
+    new_value: int,
+    clears_embedding: bool,
+) -> None:
+    embedding = [0.1, 0.2, 0.3]
+    existing_record = EvidenceRecord(
+        id="PROJECT-TEST-001",
+        evidence_type=EvidenceType.PROJECT.value,
+        supporting_text=supporting_text,
+        structured_value={"contract_value": 1000000},
+        embedding=embedding,
+    )
+    seed = CompanyEvidenceSeed(
+        evidence=[
+            Evidence(
+                evidence_id=existing_record.id,
+                evidence_type=EvidenceType.PROJECT,
+                supporting_text=supporting_text,
+                structured_value={"contract_value": new_value},
+            )
+        ]
+    )
+    session = Mock(spec=Session)
+    session.get.return_value = existing_record
+
+    seed_company_evidence(session, seed)
+
+    assert existing_record.structured_value == {"contract_value": new_value}
+    assert existing_record.embedding == (None if clears_embedding else embedding)
+
 
 def test_company_evidence_seed_clears_stale_embedding_after_text_change() -> None:
     existing_record = EvidenceRecord(

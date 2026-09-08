@@ -2,9 +2,14 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from app.api.dependencies import get_analysis_runner, get_tender_catalog
+from app.api.dependencies import (
+    get_analysis_precheck_runner,
+    get_analysis_runner,
+    get_tender_catalog,
+)
 from app.main import create_app
 from app.schemas import (
+    AnalysisPrecheck,
     AnalysisResult,
     Decision,
     DecisionStatus,
@@ -26,6 +31,7 @@ from app.services.tender_catalog import TenderSourceMissingError
 
 TEST_SHA256 = "A" * 64
 ANALYSES_URL = "/api/v1/analyses"
+PRECHECK_URL = f"{ANALYSES_URL}/precheck"
 VALID_ANALYSIS_REQUEST = {"tender_id": "TENDER-001"}
 
 
@@ -104,10 +110,44 @@ class FakeRunner:
         return _result()
 
 
-def _client(catalog: FakeCatalog, runner: FakeRunner) -> TestClient:
+class FakePrecheckRunner:
+    def __init__(self, *, requires_confirmation: bool = False) -> None:
+        self.requires_confirmation = requires_confirmation
+        self.called = False
+
+    def inspect(
+        self,
+        tender: TenderDocument,
+        pdf_path: Path,
+    ) -> AnalysisPrecheck:
+        self.called = True
+        return AnalysisPrecheck(
+            tender_id=tender.tender_id,
+            filename=pdf_path.name,
+            document_sha256=TEST_SHA256,
+            file_size_bytes=1024,
+            file_size_mb=0.0,
+            page_count=51 if self.requires_confirmation else 10,
+            requires_confirmation=self.requires_confirmation,
+            warnings=(
+                ["Document exceeds a confirmation threshold"]
+                if self.requires_confirmation
+                else []
+            ),
+        )
+
+
+def _client(
+    catalog: FakeCatalog,
+    runner: FakeRunner,
+    precheck_runner: FakePrecheckRunner | None = None,
+) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_tender_catalog] = lambda: catalog
     app.dependency_overrides[get_analysis_runner] = lambda: runner
+    app.dependency_overrides[get_analysis_precheck_runner] = lambda: (
+        precheck_runner or FakePrecheckRunner()
+    )
     return TestClient(app)
 
 
@@ -124,6 +164,51 @@ def test_create_analysis_returns_valid_result() -> None:
     assert response.status_code == 200
     assert response.json()["analysis_id"] == "ANALYSIS-TEST-001"
     assert response.json()["overall_recommendation"] == "bid"
+    assert runner.called
+
+
+def test_precheck_returns_document_facts_without_running_analysis() -> None:
+    runner = FakeRunner()
+    precheck_runner = FakePrecheckRunner()
+
+    response = _client(FakeCatalog(), runner, precheck_runner).post(
+        PRECHECK_URL,
+        json=VALID_ANALYSIS_REQUEST,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["page_count"] == 10
+    assert precheck_runner.called
+    assert not runner.called
+
+
+def test_large_analysis_requires_explicit_confirmation() -> None:
+    runner = FakeRunner()
+    response = _client(
+        FakeCatalog(),
+        runner,
+        FakePrecheckRunner(requires_confirmation=True),
+    ).post(ANALYSES_URL, json=VALID_ANALYSIS_REQUEST)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == (
+        "large_document_confirmation_required"
+    )
+    assert not runner.called
+
+
+def test_large_analysis_runs_after_confirmation() -> None:
+    runner = FakeRunner()
+    response = _client(
+        FakeCatalog(),
+        runner,
+        FakePrecheckRunner(requires_confirmation=True),
+    ).post(
+        ANALYSES_URL,
+        json={"tender_id": "TENDER-001", "confirm_large_document": True},
+    )
+
+    assert response.status_code == 200
     assert runner.called
 
 

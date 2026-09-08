@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import Settings, get_settings
 from app.database.session import create_session_factory
+from app.services.analysis_precheck import (
+    AnalysisPrecheckRunner,
+    AnalysisPrecheckService,
+)
 from app.services.configured_analysis import AnalysisRunner, ConfiguredAnalysisRunner
 from app.services.tender_catalog import TenderCatalog
 
@@ -37,3 +41,13 @@ def get_analysis_runner(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> AnalysisRunner:
     return ConfiguredAnalysisRunner(session, settings)
+
+
+def get_analysis_precheck_runner(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AnalysisPrecheckRunner:
+    return AnalysisPrecheckService(
+        max_pdf_mb=settings.max_pdf_mb,
+        max_pdf_pages=settings.max_pdf_pages,
+        page_threshold=settings.analysis_page_threshold,
+    )

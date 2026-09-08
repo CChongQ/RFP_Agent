@@ -1,4 +1,8 @@
+import json
 from collections.abc import Sequence
+from unittest.mock import Mock
+
+import pytest
 
 from app.schemas import (
     DecisionStatus,
@@ -13,7 +17,8 @@ from app.schemas import (
     RuleOutcome,
     SourceReference,
 )
-from app.services.decision_service import DecisionService
+from app.services.decision_service import DecisionService, OpenAIEvidenceAssessmentClient
+from app.services.model_usage import ModelUsageTracker
 
 """
 Test how evidence and rules become bid decisions
@@ -40,9 +45,16 @@ class FakeEvidenceReader:
 
 
 class FakeAssessmentClient:
-    def __init__(self, assessment: EvidenceAssessment) -> None:
+    def __init__(
+        self,
+        assessment: EvidenceAssessment,
+        *,
+        retry_assessment: EvidenceAssessment | None = None,
+    ) -> None:
         self._assessment = assessment
+        self._retry_assessment = retry_assessment
         self.received_evidence: list[Evidence] = []
+        self.rejected_evidence_ids: list[list[str]] = []
 
     def assess(
         self,
@@ -50,21 +62,25 @@ class FakeAssessmentClient:
         model: str,
         requirement: Requirement,
         evidence: Sequence[Evidence],
+        rejected_evidence_ids: Sequence[str] = (),
     ) -> EvidenceAssessment:
         assert model == "mock-model"
         self.received_evidence = list(evidence)
+        rejected_ids = list(rejected_evidence_ids)
+        self.rejected_evidence_ids.append(rejected_ids)
+        if rejected_ids and self._retry_assessment is not None:
+            return self._retry_assessment
         return self._assessment
 
 
 class FixedRuleEvaluator:
-    def __init__(self, result: DeterministicRuleResult) -> None:
+    def __init__(self, result: DeterministicRuleResult | None) -> None:
         self._result = result
 
     def evaluate(
         self,
         requirement: Requirement,
-        evidence: Sequence[Evidence],
-    ) -> DeterministicRuleResult:
+    ) -> DeterministicRuleResult | None:
         return self._result
 
 
@@ -109,6 +125,7 @@ def test_decision_service_returns_bid_for_supported_mandatory_requirement() -> N
         FakeEvidenceReader([evidence]),
         assessor,
         model="mock-model",
+        rule_evaluator=FixedRuleEvaluator(None),
     )
 
     result = service.decide([_requirement()])
@@ -119,6 +136,71 @@ def test_decision_service_returns_bid_for_supported_mandatory_requirement() -> N
 
 
 # Corner-case tests
+@pytest.mark.parametrize(
+    "requirement_type",
+    [RequirementType.SCORED, RequirementType.OPTIONAL, RequirementType.INFORMATIONAL],
+)
+def test_decision_service_requires_review_without_mandatory_requirements(
+    requirement_type: RequirementType,
+) -> None:
+    
+    evidence = _evidence()
+    
+    requirement = _requirement().model_copy(
+        update={"requirement_type": requirement_type}
+    )
+    
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        FakeAssessmentClient(
+            EvidenceAssessment(
+                status=DecisionStatus.SATISFIED,
+                evidence_ids=[evidence.evidence_id],
+                reason="The stored project supports the requirement",
+            )
+        ),
+        model="mock-model",
+    )
+
+    result = service.decide([requirement])
+
+    assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+
+
+@pytest.mark.parametrize("has_selected_evidence", [False, True])
+def test_mandatory_rejection_requires_selected_evidence(
+    has_selected_evidence: bool,
+) -> None:
+    
+    evidence = _evidence().model_copy(
+        update={"supporting_text": "The company has no implementation experience"}
+    )
+    
+    selected_ids = [evidence.evidence_id] if has_selected_evidence else []
+    
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        FakeAssessmentClient(
+            EvidenceAssessment(
+                status=DecisionStatus.NOT_SATISFIED,
+                evidence_ids=selected_ids,
+                reason="The company lacks the required implementation experience",
+            )
+        ),
+        model="mock-model",
+    )
+
+    result = service.decide([_requirement()])
+
+    assert result.decisions[0].evidence_ids == selected_ids
+    if has_selected_evidence:
+        assert result.decisions[0].status is DecisionStatus.NOT_SATISFIED
+        assert result.overall_recommendation is OverallRecommendation.NO_BID
+    else:
+        assert result.decisions[0].status is DecisionStatus.INSUFFICIENT_EVIDENCE
+        assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+
+
 def test_decision_service_rejects_unsupported_satisfaction() -> None:
     evidence = _evidence()
     service = DecisionService(
@@ -139,7 +221,98 @@ def test_decision_service_rejects_unsupported_satisfaction() -> None:
     assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
 
 
-def test_deterministic_failure_overrides_model_and_produces_no_bid() -> None:
+def test_decision_service_retries_invalid_evidence_id_once() -> None:
+    evidence = _evidence() 
+    assessor = FakeAssessmentClient(
+        EvidenceAssessment(
+            status=DecisionStatus.SATISFIED,
+            evidence_ids=["requirement_id"],
+            reason="The requirement appears supported",
+        ),
+        retry_assessment=EvidenceAssessment(
+            status=DecisionStatus.SATISFIED,
+            evidence_ids=[evidence.evidence_id],
+            reason="The stored project supports the requirement",
+        ),
+    )
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        assessor,
+        model="mock-model",
+    )
+
+    result = service.decide([_requirement()])
+
+    assert result.decisions[0].status is DecisionStatus.SATISFIED
+    assert result.decisions[0].evidence_ids == [evidence.evidence_id]
+    assert assessor.rejected_evidence_ids == [[], ["requirement_id"]]
+
+
+def test_decision_service_uses_human_review_after_invalid_retry() -> None:
+    evidence = _evidence()
+    assessor = FakeAssessmentClient(
+        EvidenceAssessment(
+            status=DecisionStatus.SATISFIED,
+            evidence_ids=["requirement_id"],
+            reason="The requirement appears supported",
+        ),
+        retry_assessment=EvidenceAssessment(
+            status=DecisionStatus.SATISFIED,
+            evidence_ids=[evidence.evidence_id, "still-invalid"],
+            reason="The requirement appears supported",
+        ),
+    )
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        assessor,
+        model="mock-model",
+    )
+
+    result = service.decide([_requirement()])
+
+    decision = result.decisions[0]
+    assert decision.status is DecisionStatus.REQUIRES_HUMAN_REVIEW
+    assert decision.evidence_ids == [evidence.evidence_id]
+    assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+    assert assessor.rejected_evidence_ids == [[], ["requirement_id"]]
+
+
+@pytest.mark.parametrize("reports_usage", [True, False])
+def test_openai_assessment_input_and_reported_usage(reports_usage: bool) -> None:
+    evidence = _evidence()
+    tracker = ModelUsageTracker()
+    openai_client = Mock()
+    openai_client.responses.parse.return_value = Mock(
+        output_parsed=EvidenceAssessment(
+            status=DecisionStatus.SATISFIED,
+            evidence_ids=[evidence.evidence_id],
+            reason="The stored project supports the requirement",
+        ),
+        usage=Mock(input_tokens=100, output_tokens=40) if reports_usage else None,
+    )
+    client = OpenAIEvidenceAssessmentClient(openai_client, tracker)
+
+    client.assess(
+        model="mock-model",
+        requirement=_requirement(),
+        evidence=[evidence],
+        rejected_evidence_ids=["requirement_id"],
+    )
+
+    input_payload = json.loads(
+        openai_client.responses.parse.call_args.kwargs["input"]
+    )
+    assert input_payload["allowed_evidence_ids"] == [evidence.evidence_id]
+    assert input_payload["validation_feedback"]["rejected_evidence_ids"] == [
+        "requirement_id"
+    ]
+    usage = tracker.snapshot()
+    assert usage.input_tokens == (100 if reports_usage else 0)
+    assert usage.output_tokens == (40 if reports_usage else 0)
+    assert usage.unreported_calls == (0 if reports_usage else 1)
+
+
+def test_automatic_rule_failure_requires_human_review() -> None:
     evidence = _evidence()
     failed_rule = DeterministicRuleResult(
         rule_type="minimum_count",
@@ -161,6 +334,58 @@ def test_deterministic_failure_overrides_model_and_produces_no_bid() -> None:
 
     result = service.decide([_requirement()])
 
-    assert result.decisions[0].status is DecisionStatus.NOT_SATISFIED
+    assert result.decisions[0].status is DecisionStatus.REQUIRES_HUMAN_REVIEW
     assert result.decisions[0].rule_result == failed_rule
-    assert result.overall_recommendation is OverallRecommendation.NO_BID
+    assert result.overall_recommendation is OverallRecommendation.HUMAN_REVIEW
+
+
+def test_rule_human_review_cannot_become_satisfied() -> None:
+    evidence = _evidence()
+    review_rule = DeterministicRuleResult(
+        rule_type="minimum_value",
+        outcome=RuleOutcome.REQUIRES_HUMAN_REVIEW,
+        reason="The stored value is missing",
+    )
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        FakeAssessmentClient(
+            EvidenceAssessment(
+                status=DecisionStatus.SATISFIED,
+                evidence_ids=[evidence.evidence_id],
+                reason="The project appears relevant",
+            )
+        ),
+        model="mock-model",
+        rule_evaluator=FixedRuleEvaluator(review_rule),
+    )
+
+    result = service.decide([_requirement()])
+
+    assert result.decisions[0].status is DecisionStatus.REQUIRES_HUMAN_REVIEW
+    assert result.decisions[0].rule_result == review_rule
+
+
+def test_passed_rule_allows_model_assessment() -> None:
+    evidence = _evidence()
+    passed_rule = DeterministicRuleResult(
+        rule_type="minimum_count",
+        outcome=RuleOutcome.PASSED,
+        reason="The project count meets the minimum",
+    )
+    service = DecisionService(
+        FakeEvidenceReader([evidence]),
+        FakeAssessmentClient(
+            EvidenceAssessment(
+                status=DecisionStatus.SATISFIED,
+                evidence_ids=[evidence.evidence_id],
+                reason="The project demonstrates relevant experience",
+            )
+        ),
+        model="mock-model",
+        rule_evaluator=FixedRuleEvaluator(passed_rule),
+    )
+
+    result = service.decide([_requirement()])
+
+    assert result.decisions[0].status is DecisionStatus.SATISFIED
+    assert result.decisions[0].rule_result == passed_rule

@@ -45,6 +45,7 @@ class RuleEvidenceValue:
     status: str | None = None
     valid_until: date | None = None
     problem: str | None = None
+    valid_from: date | None = None
 
 
 # ========== Evidence query service ==========
@@ -104,16 +105,20 @@ class RuleEvidenceService:
     ) -> RuleEvidenceValue:
         
         statement = (
-            select(EvidenceRecord.valid_until)
+            select(EvidenceRecord.valid_from, EvidenceRecord.valid_until)
             .where(*conditions)
             .distinct()
             .limit(2)
         )
         
-        values = list(self._session.scalars(statement).all())
-        if len(values) > 1:
-            return RuleEvidenceValue(problem="multiple validity dates matched the rule")
-        return RuleEvidenceValue(valid_until=values[0] if values else None)
+        rows = list(self._session.execute(statement).all())
+        if len(rows) > 1:
+            return RuleEvidenceValue(problem="multiple validity windows matched the rule")
+        if not rows:
+            return RuleEvidenceValue()
+
+        valid_from, valid_until = rows[0]
+        return RuleEvidenceValue(valid_from=valid_from, valid_until=valid_until)
 
     def _read_certification(
         self,
@@ -123,7 +128,7 @@ class RuleEvidenceService:
         status = _build_structured_field_expression("status").as_string()
         
         statement = (
-            select(status, EvidenceRecord.valid_until)
+            select(status, EvidenceRecord.valid_from, EvidenceRecord.valid_until)
             .where(*conditions)
             .distinct()
             .limit(2)
@@ -135,10 +140,12 @@ class RuleEvidenceService:
         if not rows:
             return RuleEvidenceValue()
 
-        status_value, valid_until = rows[0]
+        status_value, valid_from, valid_until = rows[0]
         if status_value is not None and not isinstance(status_value, str):
             return RuleEvidenceValue(problem="certification status is not text")
-        return RuleEvidenceValue(status=status_value, valid_until=valid_until)
+        return RuleEvidenceValue(
+            status=status_value, valid_from=valid_from, valid_until=valid_until
+        )
 
 
 # ========== Rule query validation ==========

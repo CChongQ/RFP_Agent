@@ -13,7 +13,25 @@ def _has_duplicates(values: list[str]) -> bool:
 
 
 class CreateAnalysisRequest(SchemaModel):
-    tender_id: Literal["TENDER-001"]  # to be changed, after MVP
+    tender_id: Literal["TENDER-001"]  # to be changed after MVP
+    confirm_large_document: bool = False
+
+
+class AnalysisPrecheckRequest(SchemaModel):
+    tender_id: Literal["TENDER-001"]
+
+
+class AnalysisPrecheck(SchemaModel):
+    """Lightweight document facts shown before analysis"""
+
+    tender_id: NonEmptyString
+    filename: NonEmptyString
+    document_sha256: Sha256
+    file_size_bytes: Annotated[int, Field(ge=1)]
+    file_size_mb: Annotated[float, Field(ge=0)]
+    page_count: Annotated[int, Field(ge=1)]
+    requires_confirmation: bool
+    warnings: list[NonEmptyString] = Field(default_factory=list)
 
 
 class ToolCallTrace(SchemaModel):
@@ -34,11 +52,16 @@ class TraceMetadata(SchemaModel):
     model_version: NonEmptyString
     prompt_version: NonEmptyString
     
+    # dnd at trace construction, before final persistence, commit and export
     latency_ms: Annotated[int, Field(ge=0)]
+    latency_scope: Literal["analysis_stage"] = "analysis_stage"
     
     input_tokens: Annotated[int, Field(ge=0)] = 0
     output_tokens: Annotated[int, Field(ge=0)] = 0
-    estimated_cost_usd: Annotated[float, Field(ge=0)] = 0.0
+    usage_scope: Literal["extraction_n_assess_only"] = "extraction_n_assess_only"
+    # False if any returned extraction/assessment response omitted usage.
+    usage_complete: bool = True
+    estimated_cost_usd: Annotated[float, Field(ge=0)] | None = None
     
     extracted_requirement_ids: list[NonEmptyString] = Field(default_factory=list)
     requirement_source_block_ids: dict[str, list[NonEmptyString]] = Field(
