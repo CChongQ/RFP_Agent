@@ -5,6 +5,7 @@ from time import perf_counter
 from typing import Protocol
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database.models import (
@@ -13,6 +14,7 @@ from app.database.models import (
     ANALYSIS_STATUS_RUNNING,
     AnalysisRunRecord,
     DecisionRecord,
+    EvidenceRecord,
     RequirementRecord,
     TenderRecord,
 )
@@ -28,6 +30,7 @@ from app.schemas import (
     ToolCallTrace,
     TraceMetadata,
 )
+from app.schemas.run_history import RunSettings
 from app.services.analysis_progress import (
     AnalysisEventReporter,
     AnalysisStage,
@@ -129,6 +132,11 @@ class AnalysisService:
         self._max_pdf_mb = max_pdf_mb
         self._max_pdf_pages = max_pdf_pages
         self._max_chunk_characters = max_chunk_characters
+        self._run_settings = RunSettings(
+            max_pdf_mb=max_pdf_mb,
+            max_pdf_pages=max_pdf_pages,
+            max_chunk_characters=max_chunk_characters,
+        )
         self._pdf_extractor = pdf_extractor
         self._requirement_extractor = requirement_extractor
         self._analysis_id_factory = analysis_id_factory or _new_analysis_id
@@ -192,13 +200,14 @@ class AnalysisService:
                 ]
                 for item in requirements
             }
-            self._persist_requirements(requirements)
+            self._persist_requirements(analysis_id, requirements)
             
             #make decision
             decision_result = self._decision_service.decide(
                 requirements,
                 progress_reporter=reporter,
             )
+            evidence_snapshot = self._build_evidence_snapshot(decision_result)
             
             #make analysis 
             progress.tool_calls = decision_result.tool_calls
@@ -213,7 +222,11 @@ class AnalysisService:
             
             #save result
             reporter.stage_started(AnalysisStage.PERSISTENCE)
-            self._complete_analysis_record(analysis_record, result)
+            self._complete_analysis_record(
+                analysis_record,
+                result,
+                evidence_snapshot,
+            )
             self._persist_decisions(analysis_id, decision_result)
             
             self._session.flush()
@@ -253,8 +266,10 @@ class AnalysisService:
             model_version=self._model,
             prompt_version=self._prompt_version,
             trace={},
+            run_settings=self._run_settings.model_dump(mode="json"),
         )
         self._session.add(record)
+        self._session.flush()
         return record
 
     def _extract_pdf(
@@ -344,12 +359,17 @@ class AnalysisService:
         
         self._session.flush()
 
-    def _persist_requirements(self, requirements: Sequence[Requirement]) -> None:
-        """Insert or update all requirements produced by extraction"""
+    def _persist_requirements(
+        self,
+        analysis_id: str,
+        requirements: Sequence[Requirement],
+    ) -> None:
+        """Save the requirements produced by one analysis run"""
 
         for requirement in requirements:
-            self._session.merge(
+            self._session.add(
                 RequirementRecord(
+                    analysis_id=analysis_id,
                     id=requirement.requirement_id,
                     tender_id=requirement.tender_id,
                     requirement_text=requirement.requirement_text,
@@ -361,15 +381,66 @@ class AnalysisService:
                         reference.model_dump(mode="json")
                         for reference in requirement.source_references
                     ],
+                    rules=[
+                        rule.model_dump(mode="json") for rule in requirement.rules
+                    ],
                     requires_human_review=requirement.requires_human_review,
                 )
             )
         self._session.flush()
 
+    def _build_evidence_snapshot(
+        self,
+        result: DecisionServiceResult,
+    ) -> list[dict[str, object]]:
+        """Copy the evidence used by this run"""
+
+        evidence_ids = list(
+            dict.fromkeys(
+                evidence_id
+                for decision in result.decisions
+                for evidence_id in decision.evidence_ids
+            )
+        )
+        if not evidence_ids:
+            return []
+
+        records = self._session.scalars(
+            select(EvidenceRecord).where(EvidenceRecord.id.in_(evidence_ids))
+        ).all()
+        records_by_id = {record.id: record for record in records}
+        snapshot: list[dict[str, object]] = []
+
+        for evidence_id in evidence_ids:
+            record = records_by_id.get(evidence_id)
+            if record is None:
+                continue
+            snapshot.append(
+                {
+                    "evidence_id": record.id,
+                    "evidence_type": record.evidence_type,
+                    "supporting_text": record.supporting_text,
+                    "structured_value": record.structured_value,
+                    "valid_from": (
+                        record.valid_from.isoformat()
+                        if record.valid_from is not None
+                        else None
+                    ),
+                    "valid_until": (
+                        record.valid_until.isoformat()
+                        if record.valid_until is not None
+                        else None
+                    ),
+                }
+            )
+
+        return snapshot
+
     def _complete_analysis_record(
         self,
         record: AnalysisRunRecord,
         result: AnalysisResult,
+        evidence_snapshot: list[dict[str, object]],
     ) -> None:
         """Mark the analysis complete and save its final trace"""
 
@@ -377,6 +448,7 @@ class AnalysisService:
         record.document_sha256 = result.trace.document_sha256
         record.overall_recommendation = result.overall_recommendation.value
         record.trace = result.trace.model_dump(mode="json")
+        record.evidence_snapshot = evidence_snapshot
 
     def _persist_decisions(
         self,

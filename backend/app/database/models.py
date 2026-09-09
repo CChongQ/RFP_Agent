@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -94,10 +95,14 @@ class RequirementRecord(Base):
         Index("idx_requirements_tender_id", "tender_id"),
     )
     
+    analysis_id: Mapped[str] = mapped_column(
+        ForeignKey("analysis_runs.id", ondelete="CASCADE"), primary_key=True
+    )
     id: Mapped[str] = mapped_column(String(140), primary_key=True)
     tender_id: Mapped[str] = mapped_column(
         ForeignKey("tenders.id", ondelete="CASCADE"), nullable=False
     )
+    
     requirement_text: Mapped[str] = mapped_column(Text)
     normalized_requirement: Mapped[str] = mapped_column(Text)
     requirement_type: Mapped[str] = mapped_column(String(20))
@@ -108,6 +113,7 @@ class RequirementRecord(Base):
     source_references: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB, default=list, server_default=text("'[]'::jsonb")
     )
+    rules: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
     
     requires_human_review: Mapped[bool] = mapped_column(Boolean, default=False)
     
@@ -184,6 +190,8 @@ class AnalysisRunRecord(Base):
     trace: Mapped[dict[str, Any]] = mapped_column(
         JSONB, default=dict, server_default=text("'{}'::jsonb")
     )
+    evidence_snapshot: Mapped[list[dict[str, Any]] | None] = mapped_column(JSONB)
+    run_settings: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     
     document_sha256: Mapped[str] = mapped_column(String(64))
     
@@ -201,6 +209,11 @@ class DecisionRecord(Base):
     __tablename__ = "decisions"
     
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["analysis_id", "requirement_id"],
+            ["requirements.analysis_id", "requirements.id"],
+            ondelete="CASCADE",
+        ),
         CheckConstraint(
             f"status IN ({DECISION_STATUS_VALUES})",
             name="status",
@@ -212,9 +225,7 @@ class DecisionRecord(Base):
     analysis_id: Mapped[str] = mapped_column(
         ForeignKey("analysis_runs.id", ondelete="CASCADE"), primary_key=True
     )
-    requirement_id: Mapped[str] = mapped_column(
-        ForeignKey("requirements.id", ondelete="CASCADE"), primary_key=True
-    )
+    requirement_id: Mapped[str] = mapped_column(String(140), primary_key=True)
     
     status: Mapped[str] = mapped_column(String(32))
     evidence_ids: Mapped[list[str]] = mapped_column(

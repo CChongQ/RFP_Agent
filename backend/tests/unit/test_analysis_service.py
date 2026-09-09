@@ -6,7 +6,12 @@ from unittest.mock import Mock
 import pytest
 from sqlalchemy.orm import Session
 
-from app.database.models import AnalysisRunRecord, DecisionRecord, RequirementRecord
+from app.database.models import (
+    AnalysisRunRecord,
+    DecisionRecord,
+    EvidenceRecord,
+    RequirementRecord,
+)
 from app.schemas import (
     Decision,
     DecisionStatus,
@@ -138,6 +143,17 @@ def test_analysis_service_builds_trace_and_flushes_records(
     # verifies orchestration and persistence logic, with all syntetic data 
     
     session = Mock(spec=Session)
+    session.scalars.return_value.all.return_value = [
+        EvidenceRecord(
+            id="PROJECT-TEST-001",
+            evidence_type="project",
+            supporting_text="A synthetic implementation project",
+            structured_value=None,
+            valid_from=None,
+            valid_until=None,
+            embedding=None,
+        )
+    ]
     requirement = _requirement()
     pdf_path = Path("synthetic.pdf")
     usage_tracker = ModelUsageTracker(
@@ -199,23 +215,36 @@ def test_analysis_service_builds_trace_and_flushes_records(
         assert result.trace.estimated_cost_usd is None
     else:
         assert result.trace.estimated_cost_usd == pytest.approx(expected_cost)
-    assert any(
-        isinstance(call.args[0], RequirementRecord)
-        for call in session.merge.call_args_list
-    )
+    added_records = [call.args[0] for call in session.add.call_args_list]
     requirement_record = next(
-        call.args[0]
-        for call in session.merge.call_args_list
-        if isinstance(call.args[0], RequirementRecord)
+        record for record in added_records if isinstance(record, RequirementRecord)
     )
+    assert requirement_record.analysis_id == "ANALYSIS-TEST-001"
     assert requirement_record.source_references[0]["block_id"] == "P001-B001"
+    assert requirement_record.rules == []
     assert any(
         isinstance(call.args[0], DecisionRecord) for call in session.merge.call_args_list
     )
-    analysis_record = session.add.call_args.args[0]
-    assert isinstance(analysis_record, AnalysisRunRecord)
+    analysis_record = next(
+        record for record in added_records if isinstance(record, AnalysisRunRecord)
+    )
     assert analysis_record.status == "completed"
     assert analysis_record.trace == result.trace.model_dump(mode="json")
+    assert analysis_record.evidence_snapshot == [
+        {
+            "evidence_id": "PROJECT-TEST-001",
+            "evidence_type": "project",
+            "supporting_text": "A synthetic implementation project",
+            "structured_value": None,
+            "valid_from": None,
+            "valid_until": None,
+        }
+    ]
+    assert analysis_record.run_settings == {
+        "max_pdf_mb": 25,
+        "max_pdf_pages": 250,
+        "max_chunk_characters": 12_000,
+    }
 
     exported_path = export_analysis_result(result, tmp_path)
     exported = json.loads(exported_path.read_text(encoding="utf-8"))
@@ -247,10 +276,12 @@ def test_analysis_result_explains_missing_mandatory_requirements(tmp_path: Path)
         overall_recommendation=OverallRecommendation.HUMAN_REVIEW,
         tool_calls=decision_result.tool_calls,
     )
+    session = Mock(spec=Session)
+    session.scalars.return_value.all.return_value = []
     
     pdf_path = Path("synthetic.pdf")
     service = AnalysisService(
-        Mock(spec=Session),
+        session,
         Mock(),
         runner,
         model="mock-model",

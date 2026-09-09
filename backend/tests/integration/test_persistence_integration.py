@@ -48,7 +48,18 @@ def test_seed_and_analysis_records_can_be_saved() -> None:
             local_filename="integration.pdf",
             sha256="A" * 64,
         )
+        analysis = AnalysisRunRecord(
+            id="ANALYSIS-INTEGRATION-001",
+            tender_id=tender.id,
+            status="completed",
+            document_sha256=tender.sha256,
+            model_version="mock-model",
+            prompt_version="test-v1",
+            overall_recommendation="bid",
+            trace={"test": True},
+        )
         requirement = RequirementRecord(
+            analysis_id=analysis.id,
             id="TENDER-INTEGRATION-001-REQ-001",
             tender_id=tender.id,
             requirement_text="The bidder must provide implementation services",
@@ -64,16 +75,6 @@ def test_seed_and_analysis_records_can_be_saved() -> None:
                 }
             ],
             requires_human_review=False,
-        )
-        analysis = AnalysisRunRecord(
-            id="ANALYSIS-INTEGRATION-001",
-            tender_id=tender.id,
-            status="completed",
-            document_sha256=tender.sha256,
-            model_version="mock-model",
-            prompt_version="test-v1",
-            overall_recommendation="bid",
-            trace={"test": True},
         )
         decision = DecisionRecord(
             analysis_id=analysis.id,
@@ -100,6 +101,7 @@ def test_seed_and_analysis_records_can_be_saved() -> None:
             )
         )
         assert evidence_count == 1
+        assert session.get(RequirementRecord, (analysis.id, requirement.id)) is not None
         assert session.get(DecisionRecord, (analysis.id, requirement.id)) is not None
     finally:
         transaction.rollback()
@@ -131,6 +133,100 @@ def test_reseeding_evidence_keeps_one_record() -> None:
     finally:
         
         # note: keep integration runs repeatable and leave no test data.
+        transaction.rollback()
+        session.close()
+        engine.dispose()
+
+
+@pytest.mark.integration
+def test_requirements_are_kept_for_each_analysis_run() -> None:
+    engine = create_database_engine()
+    
+    session = Session(engine)
+    transaction = session.begin()
+
+    try:
+        tender = TenderRecord(
+            id="TENDER-HISTORY-001",
+            title="Synthetic History Tender",
+            source_url="https://example.com/tenders/history",
+            local_filename="history.pdf",
+            sha256="B" * 64,
+        )
+        analyses = [
+            AnalysisRunRecord(
+                id=f"ANALYSIS-HISTORY-00{number}",
+                tender_id=tender.id,
+                status="completed",
+                document_sha256=tender.sha256,
+                model_version="mock-model",
+                prompt_version="test-v1",
+                overall_recommendation="bid",
+                trace={"run": number},
+                evidence_snapshot=[{"evidence_id": f"EVIDENCE-{number}"}],
+                run_settings={"max_chunk_characters": number * 1_000},
+            )
+            for number in (1, 2)
+        ]
+        
+        requirement_id = "TENDER-HISTORY-001-REQ-001"
+        requirements = [
+            RequirementRecord(
+                analysis_id=analysis.id,
+                id=requirement_id,
+                tender_id=tender.id,
+                requirement_text=f"Requirement text from run {number}",
+                normalized_requirement="Provide implementation services",
+                requirement_type="mandatory",
+                source_page=1,
+                source_excerpt=f"Requirement text from run {number}",
+                source_references=[],
+                rules=[{"rule_id": f"RULE-{number}"}],
+                requires_human_review=False,
+            )
+            for number, analysis in enumerate(analyses, start=1)
+        ]
+        
+        decisions = [
+            DecisionRecord(
+                analysis_id=analysis.id,
+                requirement_id=requirement_id,
+                status="satisfied",
+                evidence_ids=[],
+                reason=f"Decision from run {number}",
+            )
+            for number, analysis in enumerate(analyses, start=1)
+        ]
+
+        session.add(tender)
+        session.flush()
+
+        session.add_all(analyses)
+        session.flush()
+
+        session.add_all(requirements)
+        session.flush()
+
+        session.add_all(decisions)
+        session.flush()
+
+        saved_requirements = session.scalars(
+            select(RequirementRecord)
+            .where(RequirementRecord.id == requirement_id)
+            .order_by(RequirementRecord.analysis_id)
+        ).all()
+
+        assert [item.requirement_text for item in saved_requirements] == [
+            "Requirement text from run 1",
+            "Requirement text from run 2",
+        ]
+        assert [item.rules for item in saved_requirements] == [
+            [{"rule_id": "RULE-1"}],
+            [{"rule_id": "RULE-2"}],
+        ]
+        assert analyses[1].evidence_snapshot == [{"evidence_id": "EVIDENCE-2"}]
+        assert analyses[1].run_settings == {"max_chunk_characters": 2_000}
+    finally:
         transaction.rollback()
         session.close()
         engine.dispose()
